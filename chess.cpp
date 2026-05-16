@@ -43,6 +43,8 @@ struct MoveList {
         moves[n++] = m;
     }
 
+    Move* begin() { return moves.data(); }
+    Move* end() { return moves.data() + n; }
     const Move* begin() const { return moves.data(); }
     const Move* end() const { return moves.data() + n; }
 };
@@ -72,6 +74,17 @@ bool isBlack(char p) { return p >= 'a' && p <= 'z'; }
 bool isEmpty(char p) { return p == '.'; }
 bool isKing(char p) { return p == 'K' || p == 'k'; }
 char lowerPiece(char p) { return isWhite(p) ? char(p - 'A' + 'a') : p; }
+
+int pieceValue(char p) {
+    switch (lowerPiece(p)) {
+        case 'q': return 900;
+        case 'r': return 500;
+        case 'b': return 325;
+        case 'n': return 300;
+        case 'p': return 100;
+        default: return 0;
+    }
+}
 
 // Return the opposite color.
 Color other(Color c) {
@@ -394,6 +407,61 @@ MoveList legalMoves(const Position& p) {
     return out;
 }
 
+char capturedPiece(const Position& p, const Move& m) {
+    char target = p.b[m.to];
+    if (!isEmpty(target)) return target;
+
+    char pc = p.b[m.from];
+    if (lowerPiece(pc) == 'p' && m.to == p.ep && col(m.from) != col(m.to)) {
+        return p.b[idx(row(m.from), col(m.to))];
+    }
+
+    return '.';
+}
+
+int moveScore(const Position& p, const Move& m, bool forcingMove) {
+    char pc = p.b[m.from];
+    char piece = lowerPiece(pc);
+    int score = 0;
+
+    Position q = makeMove(p, m);
+    if (inCheck(q, q.side)) {
+        score += forcingMove ? 200000 : 80000;
+    }
+
+    if (m.promo) {
+        score += 100000 + pieceValue(m.promo);
+    }
+
+    char captured = capturedPiece(p, m);
+    if (!isEmpty(captured)) {
+        score += 50000 + 10 * pieceValue(captured) - pieceValue(pc);
+    }
+
+    if (!forcingMove && piece == 'k') {
+        score += 30000;
+    }
+
+    return score;
+}
+
+void orderMoves(const Position& p, MoveList& moves, bool forcingMove) {
+    array<pair<int, Move>, MAX_MOVES> scored;
+
+    for (int i = 0; i < moves.n; i++) {
+        scored[i] = {moveScore(p, moves.moves[i], forcingMove), moves.moves[i]};
+    }
+
+    stable_sort(scored.begin(), scored.begin() + moves.n,
+                [](const auto& a, const auto& b) {
+                    return a.first > b.first;
+                });
+
+    for (int i = 0; i < moves.n; i++) {
+        moves.moves[i] = scored[i].second;
+    }
+}
+
 // True when the side to move is in check and has no legal moves.
 bool isCheckmate(const Position& p) {
     if (!inCheck(p, p.side)) return false;
@@ -429,12 +497,14 @@ bool forceMateInMoves(Position p, int moves, long long& nodes) {
     MoveList myMoves;
     legalMoves(p, myMoves);
     if (myMoves.empty()) return false;
+    orderMoves(p, myMoves, true);
 
     for (const Move& m : myMoves) {
         Position q = makeMove(p, m);
 
         MoveList replies;
         legalMoves(q, replies);
+        orderMoves(q, replies, false);
 
         // Stalemate or no legal replies but not mate is not success.
         if (replies.empty()) {
