@@ -3,7 +3,7 @@
 Brute-force mate search for "short chess": ordinary chess pieces and movement
 on an 8-file board with 4 or more ranks. By default it uses a 5-rank board.
 The initial position is standard chess with middle ranks removed; on the
-default 5x8 board, this leaves one empty rank between the pawn rows.
+default 5×8 board, this leaves one empty rank between the pawn rows.
 
 The program answers two bounded questions:
 
@@ -29,7 +29,7 @@ make OPTIONS=-DBOARD_RANKS=5  # default 5x8
 make OPTIONS=-DBOARD_RANKS=8  # ordinary 8x8 board, without castling
 ```
 
-For 4x8, the two immediate winning first moves can be excluded from White's
+For 4×8, the two immediate winning first moves can be excluded from White's
 initial move choice:
 
 ```sh
@@ -59,9 +59,9 @@ Examples:
 If omitted, the depth range defaults to `1..5` and the transposition table
 defaults to `8` MB.
 
-## 4x8 Results
+## 4×8 Results
 
-The 4x8 starting board is:
+The 4×8 starting board is:
 
 ```text
 4  r n b q k b n r
@@ -143,9 +143,9 @@ Winning first moves: 1
 
 </details>
 
-## 5x8 Results
+## 5×8 Results
 
-So far, this exhaustive search has confirmed that 5x8 chess has no winning
+So far, this exhaustive search has confirmed that 5×8 chess has no winning
 strategy for White or Black up to mate-in-8.
 
 ## Main Optimizations
