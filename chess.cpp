@@ -3,12 +3,15 @@ using namespace std;
 
 static constexpr int H = 5;
 static constexpr int W = 8;
+static constexpr int N_SQUARES = H * W;
+static constexpr uint64_t BOARD_MASK = (1ULL << N_SQUARES) - 1;
 
 #ifndef TT_DOUBLE_HASH
 #define TT_DOUBLE_HASH 1
 #endif
 
 enum Color { WHITE = 0, BLACK = 1 };
+enum PieceType { PAWN = 0, KNIGHT, BISHOP, ROOK, QUEEN, KING };
 
 // A move is encoded by source and destination square indices plus optional
 // promotion piece, stored as lowercase q/r/b/n independent of side.
@@ -137,6 +140,14 @@ int popSquare(uint64_t& bb) {
     return s;
 }
 
+int firstSquare(uint64_t bb) {
+    return __builtin_ctzll(bb);
+}
+
+int lastSquare(uint64_t bb) {
+    return 63 - __builtin_clzll(bb);
+}
+
 void addToBitboards(Position& p, int s, char pc) {
     int type = pieceType(pc);
     if (type < 0) return;
@@ -162,6 +173,72 @@ void computeBitboards(Position& p) {
     for (int s = 0; s < H * W; s++) {
         addToBitboards(p, s, p.b[s]);
     }
+}
+
+struct Geometry {
+    array<uint64_t, N_SQUARES> knight{};
+    array<uint64_t, N_SQUARES> king{};
+    array<array<uint64_t, N_SQUARES>, 2> pawnAttack{};
+    array<array<uint64_t, N_SQUARES>, 2> pawnAttacker{};
+    array<array<uint64_t, N_SQUARES>, 8> ray{};
+    array<bool, 8> rayIncreasing{};
+
+    Geometry() {
+        static const int knightD[8][2] = {
+            {1,2},{2,1},{2,-1},{1,-2},
+            {-1,-2},{-2,-1},{-2,1},{-1,2}
+        };
+        static const int rayD[8][2] = {
+            {1, 0}, {-1, 0}, {0, 1}, {0, -1},
+            {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
+        };
+
+        for (int s = 0; s < N_SQUARES; s++) {
+            int r = row(s), c = col(s);
+
+            for (auto& d : knightD) {
+                int rr = r + d[0], cc = c + d[1];
+                if (inb(rr, cc)) knight[s] |= squareBit(idx(rr, cc));
+            }
+
+            for (int dr = -1; dr <= 1; dr++) {
+                for (int dc = -1; dc <= 1; dc++) {
+                    if (dr == 0 && dc == 0) continue;
+                    int rr = r + dr, cc = c + dc;
+                    if (inb(rr, cc)) king[s] |= squareBit(idx(rr, cc));
+                }
+            }
+
+            for (Color side : {WHITE, BLACK}) {
+                int dir = side == WHITE ? -1 : 1;
+                for (int dc : {-1, 1}) {
+                    int rr = r + dir, cc = c + dc;
+                    if (inb(rr, cc)) {
+                        int to = idx(rr, cc);
+                        pawnAttack[side][s] |= squareBit(to);
+                        pawnAttacker[side][to] |= squareBit(s);
+                    }
+                }
+            }
+
+            for (int dir = 0; dir < 8; dir++) {
+                int dr = rayD[dir][0], dc = rayD[dir][1];
+                rayIncreasing[dir] = dr * W + dc > 0;
+
+                int rr = r + dr, cc = c + dc;
+                while (inb(rr, cc)) {
+                    ray[dir][s] |= squareBit(idx(rr, cc));
+                    rr += dr;
+                    cc += dc;
+                }
+            }
+        }
+    }
+};
+
+const Geometry& geom() {
+    static const Geometry g;
+    return g;
 }
 
 uint64_t splitmix64(uint64_t& x) {
@@ -282,65 +359,29 @@ int findKing(const Position& p, Color side) {
 
 // True when sq is attacked by any piece of attacker.
 bool squareAttackedBy(const Position& p, int sq, Color attacker) {
-    int r = row(sq), c = col(sq);
+    const Geometry& g = geom();
+    uint64_t attackers = p.colorBB[attacker];
 
-    // Pawns.
-    if (attacker == WHITE) {
-        for (int dc : {-1, 1}) {
-            int rr = r + 1;
-            int cc = c + dc;
-            if (inb(rr, cc) && p.b[idx(rr, cc)] == 'P') return true;
-        }
-    } else {
-        for (int dc : {-1, 1}) {
-            int rr = r - 1;
-            int cc = c + dc;
-            if (inb(rr, cc) && p.b[idx(rr, cc)] == 'p') return true;
-        }
-    }
+    if (g.pawnAttacker[attacker][sq] & attackers & p.pieceBB[PAWN]) return true;
+    if (g.knight[sq] & attackers & p.pieceBB[KNIGHT]) return true;
+    if (g.king[sq] & attackers & p.pieceBB[KING]) return true;
 
-    // Knights.
-    static const int knightD[8][2] = {
-        {1,2},{2,1},{2,-1},{1,-2},
-        {-1,-2},{-2,-1},{-2,1},{-1,2}
-    };
+    uint64_t occupied = p.colorBB[WHITE] | p.colorBB[BLACK];
 
-    char n = attacker == WHITE ? 'N' : 'n';
-    for (auto& d : knightD) {
-        int rr = r + d[0], cc = c + d[1];
-        if (inb(rr, cc) && p.b[idx(rr, cc)] == n) return true;
-    }
+    for (int dir = 0; dir < 8; dir++) {
+        uint64_t blockers = g.ray[dir][sq] & occupied;
+        if (!blockers) continue;
 
-    // King.
-    char k = attacker == WHITE ? 'K' : 'k';
-    for (int dr = -1; dr <= 1; dr++) {
-        for (int dc = -1; dc <= 1; dc++) {
-            if (dr == 0 && dc == 0) continue;
-            int rr = r + dr, cc = c + dc;
-            if (inb(rr, cc) && p.b[idx(rr, cc)] == k) return true;
+        int s = g.rayIncreasing[dir] ? firstSquare(blockers) : lastSquare(blockers);
+        if (!(squareBit(s) & attackers)) continue;
+
+        char x = lowerPiece(p.b[s]);
+        if (dir < 4) {
+            if (x == 'r' || x == 'q') return true;
+        } else {
+            if (x == 'b' || x == 'q') return true;
         }
     }
-
-    char rook = attacker == WHITE ? 'R' : 'r';
-    char bishop = attacker == WHITE ? 'B' : 'b';
-    char queen = attacker == WHITE ? 'Q' : 'q';
-
-    auto ray = [&](int dr, int dc, char slider) -> bool {
-        int rr = r + dr, cc = c + dc;
-        while (inb(rr, cc)) {
-            char x = p.b[idx(rr, cc)];
-            if (!isEmpty(x)) return x == slider || x == queen;
-            rr += dr;
-            cc += dc;
-        }
-        return false;
-    };
-
-    if (ray(1, 0, rook) || ray(-1, 0, rook) ||
-        ray(0, 1, rook) || ray(0, -1, rook)) return true;
-
-    if (ray(1, 1, bishop) || ray(1, -1, bishop) ||
-        ray(-1, 1, bishop) || ray(-1, -1, bishop)) return true;
 
     return false;
 }
@@ -421,32 +462,40 @@ Position makeMove(const Position& p, const Move& m) {
     return q;
 }
 
-// Add a non-pawn move if it is on board and does not land on a friendly piece
-// or king. Kings are never captured; checkmate is represented by no legal reply.
-void addMove(MoveList& moves, const Position& p, int from, int to, char promo = 0) {
-    if (!inb(row(to), col(to))) return;
-    if (sameColor(p.b[to], p.side)) return;
-    if (isKing(p.b[to])) return;
-    moves.push_back({from, to, promo});
+void addMoveMask(MoveList& moves, int from, uint64_t targets) {
+    while (targets) {
+        moves.push_back({from, popSquare(targets), 0});
+    }
+}
+
+void addSlidingMoves(MoveList& moves, const Position& p, int from, int dir) {
+    const Geometry& g = geom();
+    uint64_t occupied = p.colorBB[WHITE] | p.colorBB[BLACK];
+    uint64_t targets = g.ray[dir][from];
+    uint64_t blockers = targets & occupied;
+
+    if (blockers) {
+        int blocker = g.rayIncreasing[dir] ? firstSquare(blockers) : lastSquare(blockers);
+        targets &= ~g.ray[dir][blocker];
+
+        if (sameColor(p.b[blocker], p.side) || isKing(p.b[blocker])) {
+            targets &= ~squareBit(blocker);
+        }
+    }
+
+    addMoveMask(moves, from, targets);
 }
 
 // Generate pseudo-legal moves for p.side: piece movement is obeyed, but moves
 // that leave p.side in check are filtered later by legalMoves().
 void pseudoMoves(const Position& p, MoveList& moves) {
     moves.clear();
+    const Geometry& g = geom();
+    uint64_t own = p.colorBB[p.side];
+    uint64_t enemyNoKing = p.colorBB[other(p.side)] & ~p.pieceBB[KING];
+    uint64_t nonKingTargets = BOARD_MASK & ~own & ~p.pieceBB[KING];
 
-    static const int knightD[8][2] = {
-        {1,2},{2,1},{2,-1},{1,-2},
-        {-1,-2},{-2,-1},{-2,1},{-1,2}
-    };
-    static const int bishopD[4][2] = {
-        {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
-    };
-    static const int rookD[4][2] = {
-        {1, 0}, {-1, 0}, {0, 1}, {0, -1}
-    };
-
-    uint64_t pawns = p.colorBB[p.side] & p.pieceBB[0];
+    uint64_t pawns = p.colorBB[p.side] & p.pieceBB[PAWN];
     while (pawns) {
         int s = popSquare(pawns);
         int r = row(s), c = col(s);
@@ -476,102 +525,56 @@ void pseudoMoves(const Position& p, MoveList& moves) {
         }
 
         // Captures.
-        for (int dc : {-1, 1}) {
-            int cc = c + dc;
-            if (!inb(rr, cc)) continue;
+        uint64_t captures = g.pawnAttack[p.side][s] & enemyNoKing;
+        while (captures) {
+            int to = popSquare(captures);
+            bool promote = (p.side == WHITE && row(to) == 0) ||
+                           (p.side == BLACK && row(to) == H - 1);
 
-            int to = idx(rr, cc);
-            if (oppColor(p.b[to], p.side) && !isKing(p.b[to])) {
-                bool promote = (p.side == WHITE && rr == 0) ||
-                               (p.side == BLACK && rr == H - 1);
-
-                if (promote) {
-                    for (char pr : {'q', 'r', 'b', 'n'}) {
-                        moves.push_back({s, to, pr});
-                    }
-                } else {
-                    moves.push_back({s, to, 0});
+            if (promote) {
+                for (char pr : {'q', 'r', 'b', 'n'}) {
+                    moves.push_back({s, to, pr});
                 }
-            }
-
-            if (to == p.ep && isEmpty(p.b[to]) &&
-                oppColor(p.b[idx(r, cc)], p.side) &&
-                lowerPiece(p.b[idx(r, cc)]) == 'p') {
+            } else {
                 moves.push_back({s, to, 0});
+            }
+        }
+
+        if (p.ep >= 0 && (g.pawnAttack[p.side][s] & squareBit(p.ep))) {
+            int capturedPawn = idx(r, col(p.ep));
+            if (isEmpty(p.b[p.ep]) &&
+                oppColor(p.b[capturedPawn], p.side) &&
+                lowerPiece(p.b[capturedPawn]) == 'p') {
+                moves.push_back({s, p.ep, 0});
             }
         }
     }
 
-    uint64_t knights = p.colorBB[p.side] & p.pieceBB[1];
+    uint64_t knights = p.colorBB[p.side] & p.pieceBB[KNIGHT];
     while (knights) {
         int s = popSquare(knights);
-        int r = row(s), c = col(s);
-
-        for (auto& d : knightD) {
-            int rr = r + d[0], cc = c + d[1];
-            if (inb(rr, cc)) addMove(moves, p, s, idx(rr, cc));
-        }
+        addMoveMask(moves, s, g.knight[s] & nonKingTargets);
     }
 
-    uint64_t kings = p.colorBB[p.side] & p.pieceBB[5];
+    uint64_t kings = p.colorBB[p.side] & p.pieceBB[KING];
     while (kings) {
         int s = popSquare(kings);
-        int r = row(s), c = col(s);
-
-        for (int dr = -1; dr <= 1; dr++) {
-            for (int dc = -1; dc <= 1; dc++) {
-                if (dr == 0 && dc == 0) continue;
-                int rr = r + dr, cc = c + dc;
-                if (inb(rr, cc)) addMove(moves, p, s, idx(rr, cc));
-            }
-        }
+        addMoveMask(moves, s, g.king[s] & nonKingTargets);
     }
 
-    uint64_t diagonalSliders = p.colorBB[p.side] & (p.pieceBB[2] | p.pieceBB[4]);
+    uint64_t diagonalSliders = p.colorBB[p.side] & (p.pieceBB[BISHOP] | p.pieceBB[QUEEN]);
     while (diagonalSliders) {
         int s = popSquare(diagonalSliders);
-        int r = row(s), c = col(s);
-
-        for (auto& d : bishopD) {
-            int rr = r + d[0], cc = c + d[1];
-
-            while (inb(rr, cc)) {
-                int to = idx(rr, cc);
-
-                if (sameColor(p.b[to], p.side)) break;
-                if (isKing(p.b[to])) break;
-
-                moves.push_back({s, to, 0});
-
-                if (oppColor(p.b[to], p.side)) break;
-
-                rr += d[0];
-                cc += d[1];
-            }
+        for (int dir = 4; dir < 8; dir++) {
+            addSlidingMoves(moves, p, s, dir);
         }
     }
 
-    uint64_t orthogonalSliders = p.colorBB[p.side] & (p.pieceBB[3] | p.pieceBB[4]);
+    uint64_t orthogonalSliders = p.colorBB[p.side] & (p.pieceBB[ROOK] | p.pieceBB[QUEEN]);
     while (orthogonalSliders) {
         int s = popSquare(orthogonalSliders);
-        int r = row(s), c = col(s);
-
-        for (auto& d : rookD) {
-            int rr = r + d[0], cc = c + d[1];
-
-            while (inb(rr, cc)) {
-                int to = idx(rr, cc);
-
-                if (sameColor(p.b[to], p.side)) break;
-                if (isKing(p.b[to])) break;
-
-                moves.push_back({s, to, 0});
-
-                if (oppColor(p.b[to], p.side)) break;
-
-                rr += d[0];
-                cc += d[1];
-            }
+        for (int dir = 0; dir < 4; dir++) {
+            addSlidingMoves(moves, p, s, dir);
         }
     }
 }

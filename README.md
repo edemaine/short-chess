@@ -55,5 +55,8 @@ If omitted, `max-depth` defaults to `5` and the transposition table defaults to
   locations, Zobrist keys, and color/piece bitboards.
 - Move generation uses the bitboards to iterate directly over the side-to-move's
   pieces by type, while retaining a square array for simple destination lookups.
+- Precomputed bit masks describe knight moves, king moves, pawn attacks, and
+  sliding-piece rays from each square, reducing coordinate-loop work in move
+  generation and check detection.
 - Move generation uses fixed-capacity move lists to keep the recursive search
   allocation-free on its hot path.
