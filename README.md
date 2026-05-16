@@ -1,0 +1,46 @@
+# Short Chess Mate Search
+
+Brute-force mate search for "short chess": ordinary chess pieces and movement
+on an 8-file by 5-rank board. The initial position is standard chess with three
+middle ranks removed, leaving one empty rank between the pawn rows.
+
+The program answers two bounded questions:
+
+- Can White, moving first, force checkmate in N White moves?
+- After any White first move, can Black force checkmate in N Black moves?
+
+The rules implemented are normal movement, check/checkmate, promotion, initial
+two-square pawn moves, and en passant. Castling and draw rules are intentionally
+omitted.
+
+## Build and Run
+
+```sh
+make
+./chess [max-depth] [transposition-table-mb]
+```
+
+Examples:
+
+```sh
+./chess 5 8   # search through mate-in-5 with an 8 MB transposition table
+./chess 6 0   # search through mate-in-6 with the transposition table disabled
+```
+
+If omitted, `max-depth` defaults to `5` and the transposition table defaults to
+`8` MB.
+
+## Main Optimizations
+
+- Move ordering prioritizes checking moves, promotions, and high-value captures
+  so failed branches are usually refuted earlier.
+- A fixed-size transposition table caches exact search results for
+  `(position, remaining moves)`. It uses
+  [Zobrist hashing](https://en.wikipedia.org/wiki/Zobrist_hashing) and a
+  configurable memory budget instead of trying to store every reachable
+  position.
+- Position state is updated incrementally during move making, including king
+  locations and Zobrist keys, so common search queries avoid rescanning the
+  board.
+- Move generation uses fixed-capacity move lists to keep the recursive search
+  allocation-free on its hot path.

@@ -1,21 +1,6 @@
 #include <bits/stdc++.h>
 using namespace std;
 
-/*
- * Brute-force mate search for "short chess": ordinary chess pieces and
- * movement on an 8-file by 5-rank board. The initial position is standard
- * chess with three middle ranks removed, leaving one empty rank between the
- * pawn rows.
- *
- * The program answers two bounded questions:
- *   - Can White, moving first, force checkmate in N White moves?
- *   - After any White first move, can Black force checkmate in N Black moves?
- *
- * The rules implemented are normal movement, check/checkmate, promotion,
- * initial two-square pawn moves, and en passant. Castling and draw rules are
- * intentionally omitted.
- */
-
 static constexpr int H = 5;
 static constexpr int W = 8;
 
