@@ -59,6 +59,76 @@ Examples:
 If omitted, the depth range defaults to `1..5` and the transposition table
 defaults to `8` MB.
 
+## 4x8 Results
+
+The 4x8 starting board is:
+
+```text
+4  r n b q k b n r
+3  p p p p p p p p
+2  P P P P P P P P
+1  R N B Q K B N R
+   a b c d e f g h
+```
+
+White has two immediate winning moves:
+
+```text
+1. White e2f3#
+  4  r n b q k b n r
+  3  p p p p p P p p
+  2  P P P P . P P P
+  1  R N B Q K B N R
+     a b c d e f g h
+
+1. White g2f3#
+  4  r n b q k b n r
+  3  p p p p p P p p
+  2  P P P P P P . P
+  1  R N B Q K B N R
+     a b c d e f g h
+```
+
+With `FORBID_TRIVIAL_4X8_WIN=1`, those two first moves are excluded and White
+still has a mate in 3:
+
+```text
+1. White b1c3 (Black has 1 legal reply)
+  4  r n b q k b n r
+  3  p p N p p p p p
+  2  P P P P P P P P
+  1  R . B Q K B N R
+     a b c d e f g h
+
+  if Black d4c3:
+    4  r n b . k b n r
+    3  p p q p p p p p
+    2  P P P P P P P P
+    1  R . B Q K B N R
+       a b c d e f g h
+
+    2. White e2f3 (Black has 1 legal reply)
+      4  r n b . k b n r
+      3  p p q p p P p p
+      2  P P P P . P P P
+      1  R . B Q K B N R
+         a b c d e f g h
+
+      if Black e4d4:
+        4  r n b k . b n r
+        3  p p q p p P p p
+        2  P P P P . P P P
+        1  R . B Q K B N R
+           a b c d e f g h
+
+        3. White b2c3#
+          4  r n b k . b n r
+          3  p p P p p P p p
+          2  P . P P . P P P
+          1  R . B Q K B N R
+             a b c d e f g h
+```
+
 ## Main Optimizations
 
 - Move ordering prioritizes checking moves, promotions, and high-value captures

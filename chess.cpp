@@ -962,6 +962,76 @@ bool forceMateInMovesRoot(const Position& p, int moves, long long& nodes) {
 #define forceMateInMovesRoot forceMateInMoves
 #endif
 
+void printIndent(int n) {
+    for (int i = 0; i < n; i++) cout << ' ';
+}
+
+void printBoard(const Position& p, int indent = 0);
+
+void printStrategyBoard(const Position& p, int indent) {
+    printBoard(p, indent);
+    cout << "\n";
+}
+
+bool moveForcesMate(const Position& p, const Move& m, int moves) {
+    Position q = makeMove(p, m);
+    MoveList replies = legalMoves(q);
+
+    if (replies.empty()) return inCheck(q, q.side);
+
+    for (const Move& reply : replies) {
+        Position afterReply = makeMove(q, reply);
+        long long nodes = 0;
+        if (!forceMateInMoves(afterReply, moves - 1, nodes)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Print one forcing strategy tree for the side to move. This is used for small
+// top-level White mate reports: the root can have special first-move filtering,
+// while recursive calls use the normal legal move set and search.
+bool printMateStrategy(const Position& p, int moves, int moveNumber, int indent,
+                       bool root = false) {
+    MoveList myMoves = root ? legalMovesRoot(p) : legalMoves(p);
+
+    for (const Move& wm : myMoves) {
+        if (!moveForcesMate(p, wm, moves)) continue;
+
+        Position q = makeMove(p, wm);
+        MoveList replies = legalMoves(q);
+
+        printIndent(indent);
+        cout << moveNumber << ". White " << moveName(wm);
+        if (replies.empty()) {
+            cout << "#\n";
+            printStrategyBoard(q, indent + 2);
+            return true;
+        }
+        cout << " (Black has " << replies.n << " legal "
+             << (replies.n == 1 ? "reply" : "replies") << ")\n";
+        printStrategyBoard(q, indent + 2);
+
+        for (const Move& reply : replies) {
+            Position afterReply = makeMove(q, reply);
+            printIndent(indent + 2);
+            cout << "if Black " << moveName(reply) << ":\n";
+            printStrategyBoard(afterReply, indent + 4);
+            if (!printMateStrategy(afterReply, moves - 1,
+                                   moveNumber + 1, indent + 4)) {
+                printIndent(indent + 4);
+                cout << "(strategy not found)\n";
+            }
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
 // Print whether White can force mate from the initial position in n White moves.
 bool whiteCanForceMateIn(const Position& start, int n) {
     Position p = start;
@@ -974,6 +1044,13 @@ bool whiteCanForceMateIn(const Position& start, int n) {
     cout << "White mate in " << n << ": "
          << (ans ? "YES" : "no")
          << ", nodes=" << nodes << "\n";
+
+    if (ans && n <= 3) {
+        cout << "\nWhite mate-in-" << n << " strategy:\n";
+        if (!printMateStrategy(p, n, 1, 0, true)) {
+            cout << "(strategy not found)\n";
+        }
+    }
 
     return ans;
 }
@@ -1016,14 +1093,16 @@ bool blackCanForceMateAfterWhiteMove(const Position& start, int n) {
 }
 
 // Print the board with ranks 1..H and files a..h.
-void printBoard(const Position& p) {
+void printBoard(const Position& p, int indent) {
     for (int r = 0; r < H; r++) {
+        printIndent(indent);
         cout << H - r << "  ";
         for (int c = 0; c < W; c++) {
             cout << p.b[idx(r, c)] << ' ';
         }
         cout << "\n";
     }
+    printIndent(indent);
     cout << "   ";
     for (int c = 0; c < W; c++) {
         cout << char('a' + c) << ' ';
