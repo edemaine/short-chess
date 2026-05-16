@@ -143,6 +143,11 @@ Winning first moves: 1
 
 </details>
 
+## 5x8 Results
+
+So far, this exhaustive search has confirmed that 5x8 chess has no winning
+strategy for White or Black up to mate-in-8.
+
 ## Main Optimizations
 
 - Move ordering prioritizes checking moves, promotions, and high-value captures
