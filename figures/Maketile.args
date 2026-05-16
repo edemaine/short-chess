@@ -1,5 +1,8 @@
-# Use the upstream SVG Tiler chess example for board/piece rendering, then add
-# local rank/file labels around every diagram.
+# Strip local move annotations and draw last-move lines.
+move.coffee
+# Render checkerboard backgrounds and chess pieces from SVG Tiler's chess example.
 svgtiler/examples/chess/map.coffee
+# Add rank/file labels around every diagram.
 labels.coffee
-*.asc
+# Build all board diagrams.
+*.ssv

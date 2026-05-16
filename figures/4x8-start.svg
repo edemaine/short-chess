@@ -131,7 +131,7 @@
     </g>
   </symbol>
   <rect x="-24" y="0" width="384" height="204" fill="#fff"/>
-  <title>Chess diagram 4x8-start.asc</title>
+  <title>Chess diagram 4x8-start.ssv</title>
   <use xlink:href="#r" x="0" y="0"/>
   <use xlink:href="#n" x="45" y="0"/>
   <use xlink:href="#r" x="90" y="0"/>

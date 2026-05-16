@@ -131,7 +131,7 @@
     </g>
   </symbol>
   <rect x="-24" y="0" width="384" height="204" fill="#fff"/>
-  <title>Chess diagram 4x8-mate3-2-e2f3.asc</title>
+  <title>Chess diagram 4x8-mate3-2-e2f3.ssv</title>
   <use xlink:href="#r" x="0" y="0"/>
   <use xlink:href="#n" x="45" y="0"/>
   <use xlink:href="#r" x="90" y="0"/>
@@ -164,6 +164,7 @@
   <use xlink:href="#r" x="225" y="135"/>
   <use xlink:href="#n" x="270" y="135"/>
   <use xlink:href="#r" x="315" y="135"/>
+  <line x1="202.5" y1="112.5" x2="247.5" y2="67.5" stroke="hsl(286,65%,50%,70%)" stroke-width="10" stroke-linecap="round"/>
   <use xlink:href="#r_v1" x="0" y="0"/>
   <use xlink:href="#n_v1" x="45" y="0"/>
   <use xlink:href="#b" x="90" y="0"/>
