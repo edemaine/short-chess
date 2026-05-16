@@ -29,10 +29,29 @@ struct Move {
     char promo; // 0, 'q', 'r', 'b', 'n'
 };
 
+static constexpr int MAX_MOVES = 256;
+
+struct MoveList {
+    array<Move, MAX_MOVES> moves{};
+    int n = 0;
+
+    void clear() { n = 0; }
+    bool empty() const { return n == 0; }
+
+    void push_back(const Move& m) {
+        assert(n < MAX_MOVES);
+        moves[n++] = m;
+    }
+
+    const Move* begin() const { return moves.data(); }
+    const Move* end() const { return moves.data() + n; }
+};
+
 // Board squares contain piece letters, using uppercase for White, lowercase
 // for Black, and '.' for empty. ep stores the current en-passant target square.
 struct Position {
     array<char, H * W> b{};
+    array<int, 2> king = {-1, -1};
     Color side = WHITE;
     int ep = -1; // En-passant target square, or -1.
 };
@@ -52,6 +71,7 @@ bool isWhite(char p) { return p >= 'A' && p <= 'Z'; }
 bool isBlack(char p) { return p >= 'a' && p <= 'z'; }
 bool isEmpty(char p) { return p == '.'; }
 bool isKing(char p) { return p == 'K' || p == 'k'; }
+char lowerPiece(char p) { return isWhite(p) ? char(p - 'A' + 'a') : p; }
 
 // Return the opposite color.
 Color other(Color c) {
@@ -72,7 +92,7 @@ bool oppColor(char p, Color side) {
 
 // Make a side-colored piece from a lowercase piece letter.
 char makePiece(Color side, char lower) {
-    return side == WHITE ? toupper(lower) : lower;
+    return side == WHITE ? char(lower - 'a' + 'A') : lower;
 }
 
 // Build the short-chess starting position.
@@ -94,6 +114,8 @@ Position initial5x8() {
     }
 
     p.side = WHITE;
+    p.king[WHITE] = idx(4, 4);
+    p.king[BLACK] = idx(0, 4);
     return p;
 }
 
@@ -147,37 +169,33 @@ bool squareAttackedBy(const Position& p, int sq, Color attacker) {
         }
     }
 
-    auto ray = [&](int dr, int dc, const string& attackers) -> bool {
+    char rook = attacker == WHITE ? 'R' : 'r';
+    char bishop = attacker == WHITE ? 'B' : 'b';
+    char queen = attacker == WHITE ? 'Q' : 'q';
+
+    auto ray = [&](int dr, int dc, char slider) -> bool {
         int rr = r + dr, cc = c + dc;
         while (inb(rr, cc)) {
             char x = p.b[idx(rr, cc)];
-            if (!isEmpty(x)) return attackers.find(x) != string::npos;
+            if (!isEmpty(x)) return x == slider || x == queen;
             rr += dr;
             cc += dc;
         }
         return false;
     };
 
-    if (attacker == WHITE) {
-        if (ray(1, 0, "RQ") || ray(-1, 0, "RQ") ||
-            ray(0, 1, "RQ") || ray(0, -1, "RQ")) return true;
+    if (ray(1, 0, rook) || ray(-1, 0, rook) ||
+        ray(0, 1, rook) || ray(0, -1, rook)) return true;
 
-        if (ray(1, 1, "BQ") || ray(1, -1, "BQ") ||
-            ray(-1, 1, "BQ") || ray(-1, -1, "BQ")) return true;
-    } else {
-        if (ray(1, 0, "rq") || ray(-1, 0, "rq") ||
-            ray(0, 1, "rq") || ray(0, -1, "rq")) return true;
-
-        if (ray(1, 1, "bq") || ray(1, -1, "bq") ||
-            ray(-1, 1, "bq") || ray(-1, -1, "bq")) return true;
-    }
+    if (ray(1, 1, bishop) || ray(1, -1, bishop) ||
+        ray(-1, 1, bishop) || ray(-1, -1, bishop)) return true;
 
     return false;
 }
 
 // True when side's king is currently attacked.
 bool inCheck(const Position& p, Color side) {
-    int ksq = findKing(p, side);
+    int ksq = p.king[side];
     if (ksq < 0) return true;
     return squareAttackedBy(p, ksq, other(side));
 }
@@ -187,7 +205,8 @@ bool inCheck(const Position& p, Color side) {
 Position makeMove(const Position& p, const Move& m) {
     Position q = p;
     char pc = q.b[m.from];
-    bool epCapture = tolower(pc) == 'p' &&
+    char piece = lowerPiece(pc);
+    bool epCapture = piece == 'p' &&
                      m.to == p.ep &&
                      isEmpty(q.b[m.to]) &&
                      col(m.from) != col(m.to);
@@ -197,10 +216,13 @@ Position makeMove(const Position& p, const Move& m) {
         q.b[idx(row(m.from), col(m.to))] = '.';
     }
     q.b[m.to] = m.promo ? makePiece(p.side, m.promo) : pc;
+    if (piece == 'k') {
+        q.king[p.side] = m.to;
+    }
     q.side = other(p.side);
     q.ep = -1;
 
-    if (tolower(pc) == 'p' && abs(row(m.to) - row(m.from)) == 2) {
+    if (piece == 'p' && abs(row(m.to) - row(m.from)) == 2) {
         q.ep = idx((row(m.from) + row(m.to)) / 2, col(m.from));
     }
 
@@ -209,7 +231,7 @@ Position makeMove(const Position& p, const Move& m) {
 
 // Add a non-pawn move if it is on board and does not land on a friendly piece
 // or king. Kings are never captured; checkmate is represented by no legal reply.
-void addMove(vector<Move>& moves, const Position& p, int from, int to, char promo = 0) {
+void addMove(MoveList& moves, const Position& p, int from, int to, char promo = 0) {
     if (!inb(row(to), col(to))) return;
     if (sameColor(p.b[to], p.side)) return;
     if (isKing(p.b[to])) return;
@@ -218,15 +240,26 @@ void addMove(vector<Move>& moves, const Position& p, int from, int to, char prom
 
 // Generate pseudo-legal moves for p.side: piece movement is obeyed, but moves
 // that leave p.side in check are filtered later by legalMoves().
-vector<Move> pseudoMoves(const Position& p) {
-    vector<Move> moves;
+void pseudoMoves(const Position& p, MoveList& moves) {
+    moves.clear();
+
+    static const int knightD[8][2] = {
+        {1,2},{2,1},{2,-1},{1,-2},
+        {-1,-2},{-2,-1},{-2,1},{-1,2}
+    };
+    static const int bishopD[4][2] = {
+        {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
+    };
+    static const int rookD[4][2] = {
+        {1, 0}, {-1, 0}, {0, 1}, {0, -1}
+    };
 
     for (int s = 0; s < H * W; s++) {
         char pc = p.b[s];
         if (!sameColor(pc, p.side)) continue;
 
         int r = row(s), c = col(s);
-        char l = tolower(pc);
+        char l = lowerPiece(pc);
 
         if (l == 'p') {
             int dir = p.side == WHITE ? -1 : 1;
@@ -275,19 +308,14 @@ vector<Move> pseudoMoves(const Position& p) {
 
                 if (to == p.ep && isEmpty(p.b[to]) &&
                     oppColor(p.b[idx(r, cc)], p.side) &&
-                    tolower(p.b[idx(r, cc)]) == 'p') {
+                    lowerPiece(p.b[idx(r, cc)]) == 'p') {
                     moves.push_back({s, to, 0});
                 }
             }
         }
 
         else if (l == 'n') {
-            static const int nd[8][2] = {
-                {1,2},{2,1},{2,-1},{1,-2},
-                {-1,-2},{-2,-1},{-2,1},{-1,2}
-            };
-
-            for (auto& d : nd) {
+            for (auto& d : knightD) {
                 int rr = r + d[0], cc = c + d[1];
                 if (inb(rr, cc)) addMove(moves, p, s, idx(rr, cc));
             }
@@ -304,62 +332,74 @@ vector<Move> pseudoMoves(const Position& p) {
         }
 
         else {
-            vector<pair<int,int>> dirs;
-
             if (l == 'b' || l == 'q') {
-                dirs.push_back({1, 1});
-                dirs.push_back({1, -1});
-                dirs.push_back({-1, 1});
-                dirs.push_back({-1, -1});
+                for (auto& d : bishopD) {
+                    int rr = r + d[0], cc = c + d[1];
+
+                    while (inb(rr, cc)) {
+                        int to = idx(rr, cc);
+
+                        if (sameColor(p.b[to], p.side)) break;
+                        if (isKing(p.b[to])) break;
+
+                        moves.push_back({s, to, 0});
+
+                        if (oppColor(p.b[to], p.side)) break;
+
+                        rr += d[0];
+                        cc += d[1];
+                    }
+                }
             }
 
             if (l == 'r' || l == 'q') {
-                dirs.push_back({1, 0});
-                dirs.push_back({-1, 0});
-                dirs.push_back({0, 1});
-                dirs.push_back({0, -1});
-            }
+                for (auto& d : rookD) {
+                    int rr = r + d[0], cc = c + d[1];
 
-            for (auto [dr, dc] : dirs) {
-                int rr = r + dr, cc = c + dc;
+                    while (inb(rr, cc)) {
+                        int to = idx(rr, cc);
 
-                while (inb(rr, cc)) {
-                    int to = idx(rr, cc);
+                        if (sameColor(p.b[to], p.side)) break;
+                        if (isKing(p.b[to])) break;
 
-                    if (sameColor(p.b[to], p.side)) break;
+                        moves.push_back({s, to, 0});
 
-                    if (isKing(p.b[to])) break;
+                        if (oppColor(p.b[to], p.side)) break;
 
-                    moves.push_back({s, to, 0});
-
-                    if (oppColor(p.b[to], p.side)) break;
-
-                    rr += dr;
-                    cc += dc;
+                        rr += d[0];
+                        cc += d[1];
+                    }
                 }
             }
         }
     }
-
-    return moves;
 }
 
 // Generate all fully legal moves for p.side.
-vector<Move> legalMoves(const Position& p) {
-    vector<Move> out;
+void legalMoves(const Position& p, MoveList& out) {
+    MoveList pseudo;
 
-    for (const Move& m : pseudoMoves(p)) {
+    out.clear();
+    pseudoMoves(p, pseudo);
+
+    for (const Move& m : pseudo) {
         Position q = makeMove(p, m);
         if (!inCheck(q, p.side)) out.push_back(m);
     }
+}
 
+MoveList legalMoves(const Position& p) {
+    MoveList out;
+    legalMoves(p, out);
     return out;
 }
 
 // True when the side to move is in check and has no legal moves.
 bool isCheckmate(const Position& p) {
     if (!inCheck(p, p.side)) return false;
-    return legalMoves(p).empty();
+    MoveList moves;
+    legalMoves(p, moves);
+    return moves.empty();
 }
 
 // Convert a board index to algebraic square notation such as "e4".
@@ -384,21 +424,23 @@ bool forceMateInMoves(Position p, int moves, long long& nodes) {
     nodes++;
 
     // p.side is the side trying to force mate at this node.
-    if (isCheckmate(p)) return false;
     if (moves <= 0) return false;
 
-    vector<Move> myMoves = legalMoves(p);
+    MoveList myMoves;
+    legalMoves(p, myMoves);
     if (myMoves.empty()) return false;
 
     for (const Move& m : myMoves) {
         Position q = makeMove(p, m);
 
-        if (isCheckmate(q)) return true;
-
-        vector<Move> replies = legalMoves(q);
+        MoveList replies;
+        legalMoves(q, replies);
 
         // Stalemate or no legal replies but not mate is not success.
-        if (replies.empty()) continue;
+        if (replies.empty()) {
+            if (inCheck(q, q.side)) return true;
+            continue;
+        }
 
         bool worksAgainstEveryReply = true;
 
@@ -439,7 +481,7 @@ bool blackCanForceMateAfterWhiteMove(const Position& start, int n) {
     Position p = start;
     p.side = WHITE;
 
-    vector<Move> whiteFirstMoves = legalMoves(p);
+    MoveList whiteFirstMoves = legalMoves(p);
 
     bool blackForcesAfterAllWhiteMoves = true;
 
