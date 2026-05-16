@@ -20,6 +20,18 @@ make
 ./chess [max-depth] [transposition-table-mb]
 ```
 
+By default, transposition-table entries store two independent 64-bit
+[Zobrist hashing](https://en.wikipedia.org/wiki/Zobrist_hashing) keys for
+collision verification. To build the smaller one-key variant:
+
+```sh
+make OPTIONS=-DTT_DOUBLE_HASH=0
+```
+
+The one-key variant is less safe because a rare hash collision could confuse
+two different positions, but it fits more transposition-table entries in the
+same memory budget.
+
 Examples:
 
 ```sh

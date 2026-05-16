@@ -4,6 +4,10 @@ using namespace std;
 static constexpr int H = 5;
 static constexpr int W = 8;
 
+#ifndef TT_DOUBLE_HASH
+#define TT_DOUBLE_HASH 1
+#endif
+
 enum Color { WHITE = 0, BLACK = 1 };
 
 // A move is encoded by source and destination square indices plus optional
@@ -46,6 +50,9 @@ struct Position {
     array<char, H * W> b{};
     array<int, 2> king = {-1, -1};
     uint64_t key = 0;
+#if TT_DOUBLE_HASH
+    uint64_t key2 = 0;
+#endif
     Color side = WHITE;
     int ep = -1; // En-passant target square, or -1.
 };
@@ -124,20 +131,38 @@ uint64_t splitmix64(uint64_t& x) {
 
 struct Zobrist {
     array<array<uint64_t, H * W>, 12> piece{};
+#if TT_DOUBLE_HASH
+    array<array<uint64_t, H * W>, 12> piece2{};
+#endif
     array<uint64_t, H * W> ep{};
+#if TT_DOUBLE_HASH
+    array<uint64_t, H * W> ep2{};
+#endif
     uint64_t blackToMove = 0;
+#if TT_DOUBLE_HASH
+    uint64_t blackToMove2 = 0;
+#endif
 
     Zobrist() {
         uint64_t seed = 0x0c0ffee123456789ULL;
-        for (auto& pieceSquares : piece) {
-            for (uint64_t& x : pieceSquares) {
-                x = splitmix64(seed);
+        for (int p = 0; p < 12; p++) {
+            for (int s = 0; s < H * W; s++) {
+                piece[p][s] = splitmix64(seed);
+#if TT_DOUBLE_HASH
+                piece2[p][s] = splitmix64(seed);
+#endif
             }
         }
-        for (uint64_t& x : ep) {
-            x = splitmix64(seed);
+        for (int s = 0; s < H * W; s++) {
+            ep[s] = splitmix64(seed);
+#if TT_DOUBLE_HASH
+            ep2[s] = splitmix64(seed);
+#endif
         }
         blackToMove = splitmix64(seed);
+#if TT_DOUBLE_HASH
+        blackToMove2 = splitmix64(seed);
+#endif
     }
 };
 
@@ -146,19 +171,35 @@ const Zobrist& zobrist() {
     return z;
 }
 
-uint64_t computeKey(const Position& p) {
+void computeKeys(Position& p) {
     const Zobrist& z = zobrist();
-    uint64_t key = 0;
+    p.key = 0;
+#if TT_DOUBLE_HASH
+    p.key2 = 0;
+#endif
 
     for (int s = 0; s < H * W; s++) {
         int pi = pieceIndex(p.b[s]);
-        if (pi >= 0) key ^= z.piece[pi][s];
+        if (pi >= 0) {
+            p.key ^= z.piece[pi][s];
+#if TT_DOUBLE_HASH
+            p.key2 ^= z.piece2[pi][s];
+#endif
+        }
     }
 
-    if (p.side == BLACK) key ^= z.blackToMove;
-    if (p.ep >= 0) key ^= z.ep[p.ep];
-
-    return key;
+    if (p.side == BLACK) {
+        p.key ^= z.blackToMove;
+#if TT_DOUBLE_HASH
+        p.key2 ^= z.blackToMove2;
+#endif
+    }
+    if (p.ep >= 0) {
+        p.key ^= z.ep[p.ep];
+#if TT_DOUBLE_HASH
+        p.key2 ^= z.ep2[p.ep];
+#endif
+    }
 }
 
 // Build the short-chess starting position.
@@ -182,7 +223,7 @@ Position initial5x8() {
     p.side = WHITE;
     p.king[WHITE] = idx(4, 4);
     p.king[BLACK] = idx(0, 4);
-    p.key = computeKey(p);
+    computeKeys(p);
     return p;
 }
 
@@ -282,13 +323,30 @@ Position makeMove(const Position& p, const Move& m) {
     char captured = epCapture ? q.b[epCaptureSquare] : q.b[m.to];
     char placed = m.promo ? makePiece(p.side, m.promo) : pc;
 
-    if (q.ep >= 0) q.key ^= z.ep[q.ep];
+    if (q.ep >= 0) {
+        q.key ^= z.ep[q.ep];
+#if TT_DOUBLE_HASH
+        q.key2 ^= z.ep2[q.ep];
+#endif
+    }
     q.key ^= z.piece[pieceIndex(pc)][m.from];
+#if TT_DOUBLE_HASH
+    q.key2 ^= z.piece2[pieceIndex(pc)][m.from];
+#endif
     if (!isEmpty(captured)) {
         q.key ^= z.piece[pieceIndex(captured)][epCapture ? epCaptureSquare : m.to];
+#if TT_DOUBLE_HASH
+        q.key2 ^= z.piece2[pieceIndex(captured)][epCapture ? epCaptureSquare : m.to];
+#endif
     }
     q.key ^= z.piece[pieceIndex(placed)][m.to];
+#if TT_DOUBLE_HASH
+    q.key2 ^= z.piece2[pieceIndex(placed)][m.to];
+#endif
     q.key ^= z.blackToMove;
+#if TT_DOUBLE_HASH
+    q.key2 ^= z.blackToMove2;
+#endif
 
     q.b[m.from] = '.';
     if (epCapture) {
@@ -304,6 +362,9 @@ Position makeMove(const Position& p, const Move& m) {
     if (piece == 'p' && abs(row(m.to) - row(m.from)) == 2) {
         q.ep = idx((row(m.from) + row(m.to)) / 2, col(m.from));
         q.key ^= z.ep[q.ep];
+#if TT_DOUBLE_HASH
+        q.key2 ^= z.ep2[q.ep];
+#endif
     }
 
     return q;
@@ -531,13 +592,15 @@ void orderMoves(const Position& p, MoveList& moves, bool forcingMove) {
 
 struct TTEntry {
     uint64_t key = 0;
+#if TT_DOUBLE_HASH
+    uint64_t key2 = 0;
+#endif
     uint8_t moves = 0;
     int8_t result = 0; // 0 = empty, 1 = false, 2 = true.
 };
 
 struct TranspositionTable {
     vector<TTEntry> table;
-    size_t mask = 0;
     long long hits = 0;
     long long stores = 0;
 
@@ -547,19 +610,13 @@ struct TranspositionTable {
 
         size_t bytes = mb * 1024ULL * 1024ULL;
         size_t entries = bytes / sizeof(TTEntry);
-        size_t pow2 = 1;
-        while ((pow2 << 1) <= entries) {
-            pow2 <<= 1;
-        }
 
-        if (mb == 0 || pow2 == 0) {
+        if (mb == 0 || entries == 0) {
             table.clear();
-            mask = 0;
             return;
         }
 
-        table.assign(pow2, {});
-        mask = pow2 - 1;
+        table.assign(entries, {});
     }
 
     bool enabled() const {
@@ -574,11 +631,16 @@ struct TranspositionTable {
         return positionKey ^ (uint64_t(moves) * 0x9e3779b97f4a7c15ULL);
     }
 
-    bool lookup(uint64_t positionKey, int moves, bool& result) {
+    bool lookup(const Position& p, int moves, bool& result) {
         if (!enabled()) return false;
 
-        const TTEntry& e = table[cacheKey(positionKey, moves) & mask];
-        if (e.result != 0 && e.key == positionKey && e.moves == moves) {
+        const TTEntry& e = table[cacheKey(p.key, moves) % table.size()];
+        if (e.result != 0 &&
+            e.key == p.key &&
+#if TT_DOUBLE_HASH
+            e.key2 == p.key2 &&
+#endif
+            e.moves == moves) {
             hits++;
             result = e.result == 2;
             return true;
@@ -587,17 +649,24 @@ struct TranspositionTable {
         return false;
     }
 
-    void store(uint64_t positionKey, int moves, bool result) {
+    void store(const Position& p, int moves, bool result) {
         if (!enabled()) return;
 
-        TTEntry& e = table[cacheKey(positionKey, moves) & mask];
+        TTEntry& e = table[cacheKey(p.key, moves) % table.size()];
         if (e.result != 0 &&
-            (e.key != positionKey || e.moves != moves) &&
+            (e.key != p.key ||
+#if TT_DOUBLE_HASH
+             e.key2 != p.key2 ||
+#endif
+             e.moves != moves) &&
             e.moves > moves) {
             return;
         }
 
-        e.key = positionKey;
+        e.key = p.key;
+#if TT_DOUBLE_HASH
+        e.key2 = p.key2;
+#endif
         e.moves = uint8_t(moves);
         e.result = result ? 2 : 1;
         stores++;
@@ -639,14 +708,14 @@ bool forceMateInMoves(Position p, int moves, long long& nodes) {
     if (moves <= 0) return false;
 
     bool cached = false;
-    if (tt.lookup(p.key, moves, cached)) {
+    if (tt.lookup(p, moves, cached)) {
         return cached;
     }
 
     MoveList myMoves;
     legalMoves(p, myMoves);
     if (myMoves.empty()) {
-        tt.store(p.key, moves, false);
+        tt.store(p, moves, false);
         return false;
     }
     orderMoves(p, myMoves, true);
@@ -661,7 +730,7 @@ bool forceMateInMoves(Position p, int moves, long long& nodes) {
         // Stalemate or no legal replies but not mate is not success.
         if (replies.empty()) {
             if (inCheck(q, q.side)) {
-                tt.store(p.key, moves, true);
+                tt.store(p, moves, true);
                 return true;
             }
             continue;
@@ -679,12 +748,12 @@ bool forceMateInMoves(Position p, int moves, long long& nodes) {
         }
 
         if (worksAgainstEveryReply) {
-            tt.store(p.key, moves, true);
+            tt.store(p, moves, true);
             return true;
         }
     }
 
-    tt.store(p.key, moves, false);
+    tt.store(p, moves, false);
     return false;
 }
 
@@ -769,9 +838,11 @@ int main(int argc, char** argv) {
     }
     tt.resizeMB(ttMB);
 
-    cout << "\nTransposition table: "
-         << (tt.bytes() / (1024 * 1024)) << " MB, "
-         << tt.table.size() << " entries\n";
+    cout << fixed << setprecision(2)
+         << "\nTransposition table: "
+         << (double(tt.bytes()) / (1024 * 1024)) << " MB, "
+         << tt.table.size() << " entries\n"
+         << defaultfloat;
 
     cout << "\nLegal White first moves:\n";
     for (const Move& m : legalMoves(start)) {
