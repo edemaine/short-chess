@@ -1,8 +1,9 @@
 # Short Chess Mate Search
 
 Brute-force mate search for "short chess": ordinary chess pieces and movement
-on an 8-file by 5-rank board. The initial position is standard chess with three
-middle ranks removed, leaving one empty rank between the pawn rows.
+on an 8-file board with 4 or more ranks. By default it uses a 5-rank board.
+The initial position is standard chess with middle ranks removed; on the
+default 5x8 board, this leaves one empty rank between the pawn rows.
 
 The program answers two bounded questions:
 
@@ -18,6 +19,14 @@ omitted.
 ```sh
 make
 ./chess [depth|first..last] [transposition-table-mb]
+```
+
+The number of ranks is a compile-time option from 4 through 8:
+
+```sh
+make OPTIONS=-DBOARD_RANKS=4  # 4x8
+make OPTIONS=-DBOARD_RANKS=5  # default 5x8
+make OPTIONS=-DBOARD_RANKS=8  # ordinary 8x8 board, without castling
 ```
 
 By default, transposition-table entries store two independent 64-bit

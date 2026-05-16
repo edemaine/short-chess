@@ -1,10 +1,16 @@
 #include <bits/stdc++.h>
 using namespace std;
 
-static constexpr int H = 5;
+#ifndef BOARD_RANKS
+#define BOARD_RANKS 5
+#endif
+
+static constexpr int H = BOARD_RANKS;
 static constexpr int W = 8;
 static constexpr int N_SQUARES = H * W;
-static constexpr uint64_t BOARD_MASK = (1ULL << N_SQUARES) - 1;
+static_assert(H >= 4 && H <= 8, "BOARD_RANKS must be in 4..8");
+static constexpr uint64_t BOARD_MASK =
+    N_SQUARES == 64 ? ~0ULL : ((1ULL << N_SQUARES) - 1);
 
 #ifndef TT_DOUBLE_HASH
 #define TT_DOUBLE_HASH 1
@@ -67,7 +73,7 @@ int idx(int r, int c) { return r * W + c; }
 int row(int s) { return s / W; }
 int col(int s) { return s % W; }
 
-// True when a row/column coordinate is on the 5x8 board.
+// True when a row/column coordinate is on the board.
 bool inb(int r, int c) {
     return r >= 0 && r < H && c >= 0 && c < W;
 }
@@ -322,8 +328,9 @@ void computeKeys(Position& p) {
     }
 }
 
-// Build the short-chess starting position.
-Position initial5x8() {
+// Build the starting position for an H-rank, 8-file board. This is ordinary
+// chess with the middle ranks removed when H < 8.
+Position initialPosition() {
     Position p;
     p.b.fill('.');
 
@@ -335,13 +342,12 @@ Position initial5x8() {
     for (int c = 0; c < W; c++) {
         p.b[idx(0, c)] = blackBack[c];
         p.b[idx(1, c)] = blackPawns[c];
-        p.b[idx(2, c)] = '.';
-        p.b[idx(3, c)] = whitePawns[c];
-        p.b[idx(4, c)] = whiteBack[c];
+        p.b[idx(H - 2, c)] = whitePawns[c];
+        p.b[idx(H - 1, c)] = whiteBack[c];
     }
 
     p.side = WHITE;
-    p.king[WHITE] = idx(4, 4);
+    p.king[WHITE] = idx(H - 1, 4);
     p.king[BLACK] = idx(0, 4);
     computeBitboards(p);
     computeKeys(p);
@@ -931,7 +937,7 @@ bool blackCanForceMateAfterWhiteMove(const Position& start, int n) {
     return blackForcesAfterAllWhiteMoves;
 }
 
-// Print the board with short-chess ranks 1..5 and files a..h.
+// Print the board with ranks 1..H and files a..h.
 void printBoard(const Position& p) {
     for (int r = 0; r < H; r++) {
         cout << H - r << "  ";
@@ -940,7 +946,11 @@ void printBoard(const Position& p) {
         }
         cout << "\n";
     }
-    cout << "   a b c d e f g h\n";
+    cout << "   ";
+    for (int c = 0; c < W; c++) {
+        cout << char('a' + c) << ' ';
+    }
+    cout << "\n";
 }
 
 struct DepthRange {
@@ -991,6 +1001,7 @@ bool parseDepthRange(const string& spec, DepthRange& range) {
 void printUsage(const char* prog) {
     cerr << "usage: " << prog << " [depth|first..last] [transposition-table-mb]\n"
          << "  depth range must be within 1..255\n"
+         << "  build with OPTIONS=-DBOARD_RANKS=N for N in 4..8, default 5\n"
          << "  examples: " << prog << " 5, " << prog << " 1..5 8\n";
 }
 
@@ -1020,7 +1031,7 @@ int main(int argc, char** argv) {
         ttMB = strtoull(argv[2], nullptr, 10);
     }
 
-    Position start = initial5x8();
+    Position start = initialPosition();
 
     printBoard(start);
     tt.resizeMB(ttMB);
