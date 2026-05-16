@@ -24,6 +24,8 @@ The 4×8 starting board is:
 
 ![4x8 starting board](figures/4x8-start.svg)
 
+### Mate-in-1
+
 White has two immediate winning moves (mate-in-1). Can you find them?
 
 <details>
@@ -39,12 +41,14 @@ White has two immediate winning moves (mate-in-1). Can you find them?
 
 </details>
 
+### Mate-in-3
+
 If you forbid those two trivial winning first moves
 (as suggested by Martin Demaine and implemented in the code by `FORBID_TRIVIAL_4X8_WIN=1`),
 White has a unique winning first move for mate-in-3. Can you find it?
 
 <details>
-<summary>Show mate-in-3 strategy</summary>
+<summary>Show White's mate-in-3 strategy</summary>
 
 1\. White b1c3
 
