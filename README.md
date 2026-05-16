@@ -16,6 +16,64 @@ omitted.
 
 [Figures](figures) made with [SVG Tiler](https://github.com/edemaine/svgtiler).
 
+## 4×8 Results
+
+The 4×8 starting board is:
+
+![4x8 starting board](figures/4x8-start.svg)
+
+White has two immediate winning moves. Can you find them?
+
+<details>
+<summary>Show White's mate-in-1 moves</summary>
+
+1\. White e2f3#
+
+![4x8 e2f3 mate](figures/4x8-mate-e2f3.svg)
+
+1\. White g2f3#
+
+![4x8 g2f3 mate](figures/4x8-mate-g2f3.svg)
+
+</details>
+
+With `FORBID_TRIVIAL_4X8_WIN=1`, those two first moves are excluded and White
+still has a unique winning first move for mate-in-3. Can you find it?
+
+<details>
+<summary>Show mate-in-3 strategy</summary>
+
+1\. White b1c3
+
+![4x8 mate-in-3 after b1c3](figures/4x8-mate3-1-b1c3.svg)
+
+1\... Black d4c3 (only legal reply)
+
+![4x8 mate-in-3 after d4c3](figures/4x8-mate3-1-black-d4c3.svg)
+
+2\. White e2f3
+
+![4x8 mate-in-3 after e2f3](figures/4x8-mate3-2-e2f3.svg)
+
+2\... Black e4d4 (only legal reply)
+
+![4x8 mate-in-3 after e4d4](figures/4x8-mate3-2-black-e4d4.svg)
+
+3\. White b2c3#
+
+![4x8 mate-in-3 after b2c3 mate](figures/4x8-mate3-3-b2c3.svg)
+
+</details>
+
+## 5×8 Results
+
+The 5×8 starting board is:
+
+![5x8 starting board](figures/5x8-start.svg)
+
+So far, this exhaustive search has confirmed that 5×8 chess has no winning
+strategy for White or Black up to mate-in-9.
+
 ## Build and Run
 
 ```sh
@@ -60,64 +118,6 @@ Examples:
 
 If omitted, the depth range defaults to `1..5` and the transposition table
 defaults to `8` MB.
-
-## 4×8 Results
-
-The 4×8 starting board is:
-
-![4x8 starting board](figures/4x8-start.svg)
-
-White has two immediate winning moves. Can you find them?
-
-<details>
-<summary>Show White's winning moves</summary>
-
-1\. White e2f3#
-
-![4x8 e2f3 mate](figures/4x8-mate-e2f3.svg)
-
-1\. White g2f3#
-
-![4x8 g2f3 mate](figures/4x8-mate-g2f3.svg)
-
-</details>
-
-With `FORBID_TRIVIAL_4X8_WIN=1`, those two first moves are excluded and White
-still has a unique winning first move for mate in 3. Can you find it?
-
-<details>
-<summary>Show mate-in-3 strategy</summary>
-
-1\. White b1c3
-
-![4x8 mate in 3 after b1c3](figures/4x8-mate3-1-b1c3.svg)
-
-1\... Black d4c3 (only legal reply)
-
-![4x8 mate in 3 after d4c3](figures/4x8-mate3-1-black-d4c3.svg)
-
-2\. White e2f3
-
-![4x8 mate in 3 after e2f3](figures/4x8-mate3-2-e2f3.svg)
-
-2\... Black e4d4 (only legal reply)
-
-![4x8 mate in 3 after e4d4](figures/4x8-mate3-2-black-e4d4.svg)
-
-3\. White b2c3#
-
-![4x8 mate in 3 after b2c3 mate](figures/4x8-mate3-3-b2c3.svg)
-
-</details>
-
-## 5×8 Results
-
-The 5×8 starting board is:
-
-![5x8 starting board](figures/5x8-start.svg)
-
-So far, this exhaustive search has confirmed that 5×8 chess has no winning
-strategy for White or Black up to mate-in-9.
 
 ## Main Optimizations
 
