@@ -54,6 +54,7 @@ struct MoveList {
 struct Position {
     array<char, H * W> b{};
     array<int, 2> king = {-1, -1};
+    uint64_t key = 0;
     Color side = WHITE;
     int ep = -1; // En-passant target square, or -1.
 };
@@ -108,6 +109,67 @@ char makePiece(Color side, char lower) {
     return side == WHITE ? char(lower - 'a' + 'A') : lower;
 }
 
+int pieceIndex(char p) {
+    int base = isWhite(p) ? 0 : 6;
+
+    switch (lowerPiece(p)) {
+        case 'p': return base + 0;
+        case 'n': return base + 1;
+        case 'b': return base + 2;
+        case 'r': return base + 3;
+        case 'q': return base + 4;
+        case 'k': return base + 5;
+        default: return -1;
+    }
+}
+
+uint64_t splitmix64(uint64_t& x) {
+    x += 0x9e3779b97f4a7c15ULL;
+    uint64_t z = x;
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    return z ^ (z >> 31);
+}
+
+struct Zobrist {
+    array<array<uint64_t, H * W>, 12> piece{};
+    array<uint64_t, H * W> ep{};
+    uint64_t blackToMove = 0;
+
+    Zobrist() {
+        uint64_t seed = 0x0c0ffee123456789ULL;
+        for (auto& pieceSquares : piece) {
+            for (uint64_t& x : pieceSquares) {
+                x = splitmix64(seed);
+            }
+        }
+        for (uint64_t& x : ep) {
+            x = splitmix64(seed);
+        }
+        blackToMove = splitmix64(seed);
+    }
+};
+
+const Zobrist& zobrist() {
+    static const Zobrist z;
+    return z;
+}
+
+uint64_t computeKey(const Position& p) {
+    const Zobrist& z = zobrist();
+    uint64_t key = 0;
+
+    for (int s = 0; s < H * W; s++) {
+        int pi = pieceIndex(p.b[s]);
+        if (pi >= 0) key ^= z.piece[pi][s];
+    }
+
+    if (p.side == BLACK) key ^= z.blackToMove;
+    if (p.ep >= 0) key ^= z.ep[p.ep];
+
+    return key;
+}
+
 // Build the short-chess starting position.
 Position initial5x8() {
     Position p;
@@ -129,6 +191,7 @@ Position initial5x8() {
     p.side = WHITE;
     p.king[WHITE] = idx(4, 4);
     p.king[BLACK] = idx(0, 4);
+    p.key = computeKey(p);
     return p;
 }
 
@@ -216,6 +279,7 @@ bool inCheck(const Position& p, Color side) {
 // Apply a move and switch side to move. This also updates en-passant state
 // and removes the captured pawn for an en-passant capture.
 Position makeMove(const Position& p, const Move& m) {
+    const Zobrist& z = zobrist();
     Position q = p;
     char pc = q.b[m.from];
     char piece = lowerPiece(pc);
@@ -223,12 +287,23 @@ Position makeMove(const Position& p, const Move& m) {
                      m.to == p.ep &&
                      isEmpty(q.b[m.to]) &&
                      col(m.from) != col(m.to);
+    int epCaptureSquare = idx(row(m.from), col(m.to));
+    char captured = epCapture ? q.b[epCaptureSquare] : q.b[m.to];
+    char placed = m.promo ? makePiece(p.side, m.promo) : pc;
+
+    if (q.ep >= 0) q.key ^= z.ep[q.ep];
+    q.key ^= z.piece[pieceIndex(pc)][m.from];
+    if (!isEmpty(captured)) {
+        q.key ^= z.piece[pieceIndex(captured)][epCapture ? epCaptureSquare : m.to];
+    }
+    q.key ^= z.piece[pieceIndex(placed)][m.to];
+    q.key ^= z.blackToMove;
 
     q.b[m.from] = '.';
     if (epCapture) {
-        q.b[idx(row(m.from), col(m.to))] = '.';
+        q.b[epCaptureSquare] = '.';
     }
-    q.b[m.to] = m.promo ? makePiece(p.side, m.promo) : pc;
+    q.b[m.to] = placed;
     if (piece == 'k') {
         q.king[p.side] = m.to;
     }
@@ -237,6 +312,7 @@ Position makeMove(const Position& p, const Move& m) {
 
     if (piece == 'p' && abs(row(m.to) - row(m.from)) == 2) {
         q.ep = idx((row(m.from) + row(m.to)) / 2, col(m.from));
+        q.key ^= z.ep[q.ep];
     }
 
     return q;
@@ -462,6 +538,83 @@ void orderMoves(const Position& p, MoveList& moves, bool forcingMove) {
     }
 }
 
+struct TTEntry {
+    uint64_t key = 0;
+    uint8_t moves = 0;
+    int8_t result = 0; // 0 = empty, 1 = false, 2 = true.
+};
+
+struct TranspositionTable {
+    vector<TTEntry> table;
+    size_t mask = 0;
+    long long hits = 0;
+    long long stores = 0;
+
+    void resizeMB(size_t mb) {
+        hits = 0;
+        stores = 0;
+
+        size_t bytes = mb * 1024ULL * 1024ULL;
+        size_t entries = bytes / sizeof(TTEntry);
+        size_t pow2 = 1;
+        while ((pow2 << 1) <= entries) {
+            pow2 <<= 1;
+        }
+
+        if (mb == 0 || pow2 == 0) {
+            table.clear();
+            mask = 0;
+            return;
+        }
+
+        table.assign(pow2, {});
+        mask = pow2 - 1;
+    }
+
+    bool enabled() const {
+        return !table.empty();
+    }
+
+    size_t bytes() const {
+        return table.size() * sizeof(TTEntry);
+    }
+
+    uint64_t cacheKey(uint64_t positionKey, int moves) const {
+        return positionKey ^ (uint64_t(moves) * 0x9e3779b97f4a7c15ULL);
+    }
+
+    bool lookup(uint64_t positionKey, int moves, bool& result) {
+        if (!enabled()) return false;
+
+        const TTEntry& e = table[cacheKey(positionKey, moves) & mask];
+        if (e.result != 0 && e.key == positionKey && e.moves == moves) {
+            hits++;
+            result = e.result == 2;
+            return true;
+        }
+
+        return false;
+    }
+
+    void store(uint64_t positionKey, int moves, bool result) {
+        if (!enabled()) return;
+
+        TTEntry& e = table[cacheKey(positionKey, moves) & mask];
+        if (e.result != 0 &&
+            (e.key != positionKey || e.moves != moves) &&
+            e.moves > moves) {
+            return;
+        }
+
+        e.key = positionKey;
+        e.moves = uint8_t(moves);
+        e.result = result ? 2 : 1;
+        stores++;
+    }
+};
+
+TranspositionTable tt;
+
 // True when the side to move is in check and has no legal moves.
 bool isCheckmate(const Position& p) {
     if (!inCheck(p, p.side)) return false;
@@ -494,9 +647,17 @@ bool forceMateInMoves(Position p, int moves, long long& nodes) {
     // p.side is the side trying to force mate at this node.
     if (moves <= 0) return false;
 
+    bool cached = false;
+    if (tt.lookup(p.key, moves, cached)) {
+        return cached;
+    }
+
     MoveList myMoves;
     legalMoves(p, myMoves);
-    if (myMoves.empty()) return false;
+    if (myMoves.empty()) {
+        tt.store(p.key, moves, false);
+        return false;
+    }
     orderMoves(p, myMoves, true);
 
     for (const Move& m : myMoves) {
@@ -508,7 +669,10 @@ bool forceMateInMoves(Position p, int moves, long long& nodes) {
 
         // Stalemate or no legal replies but not mate is not success.
         if (replies.empty()) {
-            if (inCheck(q, q.side)) return true;
+            if (inCheck(q, q.side)) {
+                tt.store(p.key, moves, true);
+                return true;
+            }
             continue;
         }
 
@@ -523,9 +687,13 @@ bool forceMateInMoves(Position p, int moves, long long& nodes) {
             }
         }
 
-        if (worksAgainstEveryReply) return true;
+        if (worksAgainstEveryReply) {
+            tt.store(p.key, moves, true);
+            return true;
+        }
     }
 
+    tt.store(p.key, moves, false);
     return false;
 }
 
@@ -593,6 +761,7 @@ void printBoard(const Position& p) {
 }
 
 // Run the mate search up to maxN, defaulting to 5 unless overridden by argv[1].
+// argv[2] optionally sets the transposition table size in MB, defaulting to 8.
 int main(int argc, char** argv) {
     Position start = initial5x8();
 
@@ -602,6 +771,16 @@ int main(int argc, char** argv) {
     if (argc >= 2) {
         maxN = atoi(argv[1]);
     }
+
+    size_t ttMB = 8;
+    if (argc >= 3) {
+        ttMB = strtoull(argv[2], nullptr, 10);
+    }
+    tt.resizeMB(ttMB);
+
+    cout << "\nTransposition table: "
+         << (tt.bytes() / (1024 * 1024)) << " MB, "
+         << tt.table.size() << " entries\n";
 
     cout << "\nLegal White first moves:\n";
     for (const Move& m : legalMoves(start)) {
@@ -618,6 +797,9 @@ int main(int argc, char** argv) {
     for (int n = 1; n <= maxN; n++) {
         blackCanForceMateAfterWhiteMove(start, n);
     }
+
+    cout << "\nTT hits=" << tt.hits
+         << ", stores=" << tt.stores << "\n";
 
     return 0;
 }
