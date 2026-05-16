@@ -452,11 +452,14 @@ Position makeMove(const Position& p, const Move& m) {
     q.ep = -1;
 
     if (piece == 'p' && abs(row(m.to) - row(m.from)) == 2) {
-        q.ep = idx((row(m.from) + row(m.to)) / 2, col(m.from));
-        q.key ^= z.ep[q.ep];
+        int ep = idx((row(m.from) + row(m.to)) / 2, col(m.from));
+        if (geom().pawnAttacker[q.side][ep] & q.colorBB[q.side] & q.pieceBB[PAWN]) {
+            q.ep = ep;
+            q.key ^= z.ep[q.ep];
 #if TT_DOUBLE_HASH
-        q.key2 ^= z.ep2[q.ep];
+            q.key2 ^= z.ep2[q.ep];
 #endif
+        }
     }
 
     return q;
@@ -610,12 +613,11 @@ char capturedPiece(const Position& p, const Move& m) {
     return '.';
 }
 
-int moveScore(const Position& p, const Move& m, bool forcingMove) {
+int moveScore(const Position& p, const Move& m, const Position& q, bool forcingMove) {
     char pc = p.b[m.from];
     char piece = lowerPiece(pc);
     int score = 0;
 
-    Position q = makeMove(p, m);
     if (inCheck(q, q.side)) {
         score += forcingMove ? 200000 : 80000;
     }
@@ -636,21 +638,62 @@ int moveScore(const Position& p, const Move& m, bool forcingMove) {
     return score;
 }
 
-void orderMoves(const Position& p, MoveList& moves, bool forcingMove) {
-    array<pair<int, Move>, MAX_MOVES> scored;
+struct SearchMoveList {
+    using PositionStorage = aligned_storage_t<sizeof(Position), alignof(Position)>;
+    array<PositionStorage, MAX_MOVES> positionStorage;
+    array<int, MAX_MOVES> scores{};
+    array<int, MAX_MOVES> order{};
+    int n = 0;
 
-    for (int i = 0; i < moves.n; i++) {
-        scored[i] = {moveScore(p, moves.moves[i], forcingMove), moves.moves[i]};
+    ~SearchMoveList() { clear(); }
+
+    Position& position(int i) {
+        return *launder(reinterpret_cast<Position*>(&positionStorage[i]));
     }
 
-    stable_sort(scored.begin(), scored.begin() + moves.n,
-                [](const auto& a, const auto& b) {
-                    return a.first > b.first;
-                });
-
-    for (int i = 0; i < moves.n; i++) {
-        moves.moves[i] = scored[i].second;
+    const Position& position(int i) const {
+        return *launder(reinterpret_cast<const Position*>(&positionStorage[i]));
     }
+
+    void clear() {
+        for (int i = 0; i < n; i++) {
+            position(i).~Position();
+        }
+        n = 0;
+    }
+
+    bool empty() const { return n == 0; }
+
+    void push_back(const Position& p, int score) {
+        assert(n < MAX_MOVES);
+        new (&positionStorage[n]) Position(p);
+        scores[n] = score;
+        order[n] = n;
+        n++;
+    }
+
+    void sortByScore() {
+        sort(order.begin(), order.begin() + n,
+             [this](int a, int b) {
+                 return scores[a] > scores[b];
+             });
+    }
+};
+
+void legalSearchMoves(const Position& p, SearchMoveList& out, bool forcingMove) {
+    MoveList pseudo;
+
+    out.clear();
+    pseudoMoves(p, pseudo);
+
+    for (const Move& m : pseudo) {
+        Position q = makeMove(p, m);
+        if (!inCheck(q, p.side)) {
+            out.push_back(q, moveScore(p, m, q, forcingMove));
+        }
+    }
+
+    out.sortByScore();
 }
 
 struct TTEntry {
@@ -690,20 +733,21 @@ struct TranspositionTable {
         return table.size() * sizeof(TTEntry);
     }
 
-    uint64_t cacheKey(uint64_t positionKey, int moves) const {
-        return positionKey ^ (uint64_t(moves) * 0x9e3779b97f4a7c15ULL);
+    uint64_t cacheKey(uint64_t positionKey) const {
+        return positionKey;
     }
 
     bool lookup(const Position& p, int moves, bool& result) {
         if (!enabled()) return false;
 
-        const TTEntry& e = table[cacheKey(p.key, moves) % table.size()];
+        const TTEntry& e = table[cacheKey(p.key) % table.size()];
         if (e.result != 0 &&
             e.key == p.key &&
 #if TT_DOUBLE_HASH
             e.key2 == p.key2 &&
 #endif
-            e.moves == moves) {
+            ((e.result == 2 && e.moves <= moves) ||
+             (e.result == 1 && e.moves >= moves))) {
             hits++;
             result = e.result == 2;
             return true;
@@ -715,7 +759,17 @@ struct TranspositionTable {
     void store(const Position& p, int moves, bool result) {
         if (!enabled()) return;
 
-        TTEntry& e = table[cacheKey(p.key, moves) % table.size()];
+        TTEntry& e = table[cacheKey(p.key) % table.size()];
+        if (e.result != 0 &&
+            e.key == p.key &&
+#if TT_DOUBLE_HASH
+            e.key2 == p.key2 &&
+#endif
+            e.moves != moves &&
+            ((e.result == 2 && e.moves <= moves && result) ||
+             (e.result == 1 && e.moves >= moves && !result))) {
+            return;
+        }
         if (e.result != 0 &&
             (e.key != p.key ||
 #if TT_DOUBLE_HASH
@@ -764,7 +818,7 @@ string moveName(const Move& m) {
 
 // Side-to-move can force mate within this many own moves.
 // Example: moves=3 means move, reply, move, reply, move mate.
-bool forceMateInMoves(Position p, int moves, long long& nodes) {
+bool forceMateInMoves(const Position& p, int moves, long long& nodes) {
     nodes++;
 
     // p.side is the side trying to force mate at this node.
@@ -775,20 +829,18 @@ bool forceMateInMoves(Position p, int moves, long long& nodes) {
         return cached;
     }
 
-    MoveList myMoves;
-    legalMoves(p, myMoves);
+    SearchMoveList myMoves;
+    legalSearchMoves(p, myMoves, true);
     if (myMoves.empty()) {
         tt.store(p, moves, false);
         return false;
     }
-    orderMoves(p, myMoves, true);
 
-    for (const Move& m : myMoves) {
-        Position q = makeMove(p, m);
+    for (int i = 0; i < myMoves.n; i++) {
+        const Position& q = myMoves.position(myMoves.order[i]);
 
-        MoveList replies;
-        legalMoves(q, replies);
-        orderMoves(q, replies, false);
+        SearchMoveList replies;
+        legalSearchMoves(q, replies, false);
 
         // Stalemate or no legal replies but not mate is not success.
         if (replies.empty()) {
@@ -801,8 +853,8 @@ bool forceMateInMoves(Position p, int moves, long long& nodes) {
 
         bool worksAgainstEveryReply = true;
 
-        for (const Move& r : replies) {
-            Position afterReply = makeMove(q, r);
+        for (int j = 0; j < replies.n; j++) {
+            const Position& afterReply = replies.position(replies.order[j]);
 
             if (!forceMateInMoves(afterReply, moves - 1, nodes)) {
                 worksAgainstEveryReply = false;
