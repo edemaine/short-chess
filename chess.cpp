@@ -9,9 +9,15 @@ enum Color { WHITE = 0, BLACK = 1 };
 // A move is encoded by source and destination square indices plus optional
 // promotion piece, stored as lowercase q/r/b/n independent of side.
 struct Move {
-    int from;
-    int to;
-    char promo; // 0, 'q', 'r', 'b', 'n'
+    uint8_t from = 0;
+    uint8_t to = 0;
+    char promo = 0; // 0, 'q', 'r', 'b', 'n'
+
+    Move() = default;
+    Move(int from, int to, char promo = 0)
+        : from(static_cast<uint8_t>(from)),
+          to(static_cast<uint8_t>(to)),
+          promo(promo) {}
 };
 
 static constexpr int MAX_MOVES = 256;
