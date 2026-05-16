@@ -145,6 +145,17 @@ Winning first moves: 1
 
 ## 5×8 Results
 
+The 5×8 starting board is:
+
+```text
+5  r n b q k b n r
+4  p p p p p p p p
+3  . . . . . . . .
+2  P P P P P P P P
+1  R N B Q K B N R
+   a b c d e f g h
+```
+
 So far, this exhaustive search has confirmed that 5×8 chess has no winning
 strategy for White or Black up to mate-in-8.
 
