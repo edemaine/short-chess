@@ -48,6 +48,8 @@ struct MoveList {
 // for Black, and '.' for empty. ep stores the current en-passant target square.
 struct Position {
     array<char, H * W> b{};
+    array<uint64_t, 2> colorBB{};
+    array<uint64_t, 6> pieceBB{};
     array<int, 2> king = {-1, -1};
     uint64_t key = 0;
 #if TT_DOUBLE_HASH
@@ -107,17 +109,58 @@ char makePiece(Color side, char lower) {
     return side == WHITE ? char(lower - 'a' + 'A') : lower;
 }
 
-int pieceIndex(char p) {
-    int base = isWhite(p) ? 0 : 6;
-
+int pieceType(char p) {
     switch (lowerPiece(p)) {
-        case 'p': return base + 0;
-        case 'n': return base + 1;
-        case 'b': return base + 2;
-        case 'r': return base + 3;
-        case 'q': return base + 4;
-        case 'k': return base + 5;
+        case 'p': return 0;
+        case 'n': return 1;
+        case 'b': return 2;
+        case 'r': return 3;
+        case 'q': return 4;
+        case 'k': return 5;
         default: return -1;
+    }
+}
+
+int pieceIndex(char p) {
+    int type = pieceType(p);
+    if (type < 0) return -1;
+    return (isWhite(p) ? 0 : 6) + type;
+}
+
+uint64_t squareBit(int s) {
+    return 1ULL << s;
+}
+
+int popSquare(uint64_t& bb) {
+    int s = __builtin_ctzll(bb);
+    bb &= bb - 1;
+    return s;
+}
+
+void addToBitboards(Position& p, int s, char pc) {
+    int type = pieceType(pc);
+    if (type < 0) return;
+
+    uint64_t b = squareBit(s);
+    p.colorBB[isWhite(pc) ? WHITE : BLACK] |= b;
+    p.pieceBB[type] |= b;
+}
+
+void removeFromBitboards(Position& p, int s, char pc) {
+    int type = pieceType(pc);
+    if (type < 0) return;
+
+    uint64_t b = squareBit(s);
+    p.colorBB[isWhite(pc) ? WHITE : BLACK] &= ~b;
+    p.pieceBB[type] &= ~b;
+}
+
+void computeBitboards(Position& p) {
+    p.colorBB = {};
+    p.pieceBB = {};
+
+    for (int s = 0; s < H * W; s++) {
+        addToBitboards(p, s, p.b[s]);
     }
 }
 
@@ -223,6 +266,7 @@ Position initial5x8() {
     p.side = WHITE;
     p.king[WHITE] = idx(4, 4);
     p.king[BLACK] = idx(0, 4);
+    computeBitboards(p);
     computeKeys(p);
     return p;
 }
@@ -322,6 +366,7 @@ Position makeMove(const Position& p, const Move& m) {
     int epCaptureSquare = idx(row(m.from), col(m.to));
     char captured = epCapture ? q.b[epCaptureSquare] : q.b[m.to];
     char placed = m.promo ? makePiece(p.side, m.promo) : pc;
+    int capturedSquare = epCapture ? epCaptureSquare : m.to;
 
     if (q.ep >= 0) {
         q.key ^= z.ep[q.ep];
@@ -334,9 +379,9 @@ Position makeMove(const Position& p, const Move& m) {
     q.key2 ^= z.piece2[pieceIndex(pc)][m.from];
 #endif
     if (!isEmpty(captured)) {
-        q.key ^= z.piece[pieceIndex(captured)][epCapture ? epCaptureSquare : m.to];
+        q.key ^= z.piece[pieceIndex(captured)][capturedSquare];
 #if TT_DOUBLE_HASH
-        q.key2 ^= z.piece2[pieceIndex(captured)][epCapture ? epCaptureSquare : m.to];
+        q.key2 ^= z.piece2[pieceIndex(captured)][capturedSquare];
 #endif
     }
     q.key ^= z.piece[pieceIndex(placed)][m.to];
@@ -347,6 +392,12 @@ Position makeMove(const Position& p, const Move& m) {
 #if TT_DOUBLE_HASH
     q.key2 ^= z.blackToMove2;
 #endif
+
+    removeFromBitboards(q, m.from, pc);
+    if (!isEmpty(captured)) {
+        removeFromBitboards(q, capturedSquare, captured);
+    }
+    addToBitboards(q, m.to, placed);
 
     q.b[m.from] = '.';
     if (epCapture) {
@@ -395,20 +446,42 @@ void pseudoMoves(const Position& p, MoveList& moves) {
         {1, 0}, {-1, 0}, {0, 1}, {0, -1}
     };
 
-    for (int s = 0; s < H * W; s++) {
-        char pc = p.b[s];
-        if (!sameColor(pc, p.side)) continue;
-
+    uint64_t pawns = p.colorBB[p.side] & p.pieceBB[0];
+    while (pawns) {
+        int s = popSquare(pawns);
         int r = row(s), c = col(s);
-        char l = lowerPiece(pc);
+        int dir = p.side == WHITE ? -1 : 1;
+        int rr = r + dir;
 
-        if (l == 'p') {
-            int dir = p.side == WHITE ? -1 : 1;
-            int rr = r + dir;
+        // Single-step pawn push.
+        if (inb(rr, c) && isEmpty(p.b[idx(rr, c)])) {
+            int to = idx(rr, c);
+            bool promote = (p.side == WHITE && rr == 0) ||
+                           (p.side == BLACK && rr == H - 1);
 
-            // Single-step pawn push.
-            if (inb(rr, c) && isEmpty(p.b[idx(rr, c)])) {
-                int to = idx(rr, c);
+            if (promote) {
+                for (char pr : {'q', 'r', 'b', 'n'}) {
+                    moves.push_back({s, to, pr});
+                }
+            } else {
+                moves.push_back({s, to, 0});
+            }
+
+            // Initial two-square pawn push.
+            int startRow = p.side == WHITE ? H - 2 : 1;
+            int rr2 = r + 2 * dir;
+            if (r == startRow && inb(rr2, c) && isEmpty(p.b[idx(rr2, c)])) {
+                moves.push_back({s, idx(rr2, c), 0});
+            }
+        }
+
+        // Captures.
+        for (int dc : {-1, 1}) {
+            int cc = c + dc;
+            if (!inb(rr, cc)) continue;
+
+            int to = idx(rr, cc);
+            if (oppColor(p.b[to], p.side) && !isKing(p.b[to])) {
                 bool promote = (p.side == WHITE && rr == 0) ||
                                (p.side == BLACK && rr == H - 1);
 
@@ -419,98 +492,85 @@ void pseudoMoves(const Position& p, MoveList& moves) {
                 } else {
                     moves.push_back({s, to, 0});
                 }
-
-                // Initial two-square pawn push.
-                int startRow = p.side == WHITE ? H - 2 : 1;
-                int rr2 = r + 2 * dir;
-                if (r == startRow && inb(rr2, c) && isEmpty(p.b[idx(rr2, c)])) {
-                    moves.push_back({s, idx(rr2, c), 0});
-                }
             }
 
-            // Captures.
-            for (int dc : {-1, 1}) {
-                int cc = c + dc;
-                if (!inb(rr, cc)) continue;
-
-                int to = idx(rr, cc);
-                if (oppColor(p.b[to], p.side) && !isKing(p.b[to])) {
-                    bool promote = (p.side == WHITE && rr == 0) ||
-                                   (p.side == BLACK && rr == H - 1);
-
-                    if (promote) {
-                        for (char pr : {'q', 'r', 'b', 'n'}) {
-                            moves.push_back({s, to, pr});
-                        }
-                    } else {
-                        moves.push_back({s, to, 0});
-                    }
-                }
-
-                if (to == p.ep && isEmpty(p.b[to]) &&
-                    oppColor(p.b[idx(r, cc)], p.side) &&
-                    lowerPiece(p.b[idx(r, cc)]) == 'p') {
-                    moves.push_back({s, to, 0});
-                }
+            if (to == p.ep && isEmpty(p.b[to]) &&
+                oppColor(p.b[idx(r, cc)], p.side) &&
+                lowerPiece(p.b[idx(r, cc)]) == 'p') {
+                moves.push_back({s, to, 0});
             }
         }
+    }
 
-        else if (l == 'n') {
-            for (auto& d : knightD) {
-                int rr = r + d[0], cc = c + d[1];
+    uint64_t knights = p.colorBB[p.side] & p.pieceBB[1];
+    while (knights) {
+        int s = popSquare(knights);
+        int r = row(s), c = col(s);
+
+        for (auto& d : knightD) {
+            int rr = r + d[0], cc = c + d[1];
+            if (inb(rr, cc)) addMove(moves, p, s, idx(rr, cc));
+        }
+    }
+
+    uint64_t kings = p.colorBB[p.side] & p.pieceBB[5];
+    while (kings) {
+        int s = popSquare(kings);
+        int r = row(s), c = col(s);
+
+        for (int dr = -1; dr <= 1; dr++) {
+            for (int dc = -1; dc <= 1; dc++) {
+                if (dr == 0 && dc == 0) continue;
+                int rr = r + dr, cc = c + dc;
                 if (inb(rr, cc)) addMove(moves, p, s, idx(rr, cc));
             }
         }
+    }
 
-        else if (l == 'k') {
-            for (int dr = -1; dr <= 1; dr++) {
-                for (int dc = -1; dc <= 1; dc++) {
-                    if (dr == 0 && dc == 0) continue;
-                    int rr = r + dr, cc = c + dc;
-                    if (inb(rr, cc)) addMove(moves, p, s, idx(rr, cc));
-                }
+    uint64_t diagonalSliders = p.colorBB[p.side] & (p.pieceBB[2] | p.pieceBB[4]);
+    while (diagonalSliders) {
+        int s = popSquare(diagonalSliders);
+        int r = row(s), c = col(s);
+
+        for (auto& d : bishopD) {
+            int rr = r + d[0], cc = c + d[1];
+
+            while (inb(rr, cc)) {
+                int to = idx(rr, cc);
+
+                if (sameColor(p.b[to], p.side)) break;
+                if (isKing(p.b[to])) break;
+
+                moves.push_back({s, to, 0});
+
+                if (oppColor(p.b[to], p.side)) break;
+
+                rr += d[0];
+                cc += d[1];
             }
         }
+    }
 
-        else {
-            if (l == 'b' || l == 'q') {
-                for (auto& d : bishopD) {
-                    int rr = r + d[0], cc = c + d[1];
+    uint64_t orthogonalSliders = p.colorBB[p.side] & (p.pieceBB[3] | p.pieceBB[4]);
+    while (orthogonalSliders) {
+        int s = popSquare(orthogonalSliders);
+        int r = row(s), c = col(s);
 
-                    while (inb(rr, cc)) {
-                        int to = idx(rr, cc);
+        for (auto& d : rookD) {
+            int rr = r + d[0], cc = c + d[1];
 
-                        if (sameColor(p.b[to], p.side)) break;
-                        if (isKing(p.b[to])) break;
+            while (inb(rr, cc)) {
+                int to = idx(rr, cc);
 
-                        moves.push_back({s, to, 0});
+                if (sameColor(p.b[to], p.side)) break;
+                if (isKing(p.b[to])) break;
 
-                        if (oppColor(p.b[to], p.side)) break;
+                moves.push_back({s, to, 0});
 
-                        rr += d[0];
-                        cc += d[1];
-                    }
-                }
-            }
+                if (oppColor(p.b[to], p.side)) break;
 
-            if (l == 'r' || l == 'q') {
-                for (auto& d : rookD) {
-                    int rr = r + d[0], cc = c + d[1];
-
-                    while (inb(rr, cc)) {
-                        int to = idx(rr, cc);
-
-                        if (sameColor(p.b[to], p.side)) break;
-                        if (isKing(p.b[to])) break;
-
-                        moves.push_back({s, to, 0});
-
-                        if (oppColor(p.b[to], p.side)) break;
-
-                        rr += d[0];
-                        cc += d[1];
-                    }
-                }
+                rr += d[0];
+                cc += d[1];
             }
         }
     }

@@ -52,7 +52,8 @@ If omitted, `max-depth` defaults to `5` and the transposition table defaults to
   configurable memory budget instead of trying to store every reachable
   position.
 - Position state is updated incrementally during move making, including king
-  locations and Zobrist keys, so common search queries avoid rescanning the
-  board.
+  locations, Zobrist keys, and color/piece bitboards.
+- Move generation uses the bitboards to iterate directly over the side-to-move's
+  pieces by type, while retaining a square array for simple destination lookups.
 - Move generation uses fixed-capacity move lists to keep the recursive search
   allocation-free on its hot path.
