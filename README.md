@@ -29,6 +29,13 @@ make OPTIONS=-DBOARD_RANKS=5  # default 5x8
 make OPTIONS=-DBOARD_RANKS=8  # ordinary 8x8 board, without castling
 ```
 
+For 4x8, the two immediate winning first moves can be excluded from White's
+initial move choice:
+
+```sh
+make OPTIONS="-DBOARD_RANKS=4 -DFORBID_TRIVIAL_4X8_WIN=1"
+```
+
 By default, transposition-table entries store two independent 64-bit
 [Zobrist hashing](https://en.wikipedia.org/wiki/Zobrist_hashing) keys for
 collision verification. To build the smaller one-key variant:

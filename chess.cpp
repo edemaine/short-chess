@@ -16,8 +16,19 @@ static constexpr uint64_t BOARD_MASK =
 #define TT_DOUBLE_HASH 1
 #endif
 
+#ifndef FORBID_TRIVIAL_4X8_WIN
+#define FORBID_TRIVIAL_4X8_WIN 0
+#endif
+
+static_assert(!FORBID_TRIVIAL_4X8_WIN || H == 4,
+              "FORBID_TRIVIAL_4X8_WIN requires BOARD_RANKS=4");
+
 enum Color { WHITE = 0, BLACK = 1 };
 enum PieceType { PAWN = 0, KNIGHT, BISHOP, ROOK, QUEEN, KING };
+
+#if FORBID_TRIVIAL_4X8_WIN
+bool forbidTrivial4x8WinForNextMoveGen = false;
+#endif
 
 // A move is encoded by source and destination square indices plus optional
 // promotion piece, stored as lowercase q/r/b/n independent of side.
@@ -543,6 +554,14 @@ void pseudoMoves(const Position& p, MoveList& moves) {
         uint64_t captures = g.pawnAttack[p.side][s] & enemyNoKing;
         while (captures) {
             int to = popSquare(captures);
+#if FORBID_TRIVIAL_4X8_WIN
+            if (forbidTrivial4x8WinForNextMoveGen &&
+                p.side == WHITE &&
+                to == idx(1, 5) &&
+                (s == idx(H - 2, 4) || s == idx(H - 2, 6))) {
+                continue;
+            }
+#endif
             bool promote = (p.side == WHITE && row(to) == 0) ||
                            (p.side == BLACK && row(to) == H - 1);
 
@@ -612,6 +631,17 @@ MoveList legalMoves(const Position& p) {
     legalMoves(p, out);
     return out;
 }
+
+#if FORBID_TRIVIAL_4X8_WIN
+MoveList legalMovesRoot(const Position& p) {
+    forbidTrivial4x8WinForNextMoveGen = true;
+    MoveList moves = legalMoves(p);
+    forbidTrivial4x8WinForNextMoveGen = false;
+    return moves;
+}
+#else
+#define legalMovesRoot legalMoves
+#endif
 
 char capturedPiece(const Position& p, const Move& m) {
     char target = p.b[m.to];
@@ -884,6 +914,54 @@ bool forceMateInMoves(const Position& p, int moves, long long& nodes) {
     return false;
 }
 
+#if FORBID_TRIVIAL_4X8_WIN
+// Special top-level search entry point. When the trivial 4x8 filter is enabled,
+// only this root ply omits the two immediate winning moves; recursive calls use
+// forceMateInMoves() so the normal position cache and legal move set still
+// apply everywhere below the root.
+bool forceMateInMovesRoot(const Position& p, int moves, long long& nodes) {
+    nodes++;
+
+    if (moves <= 0) return false;
+
+    SearchMoveList myMoves;
+    forbidTrivial4x8WinForNextMoveGen = true;
+    legalSearchMoves(p, myMoves, true);
+    forbidTrivial4x8WinForNextMoveGen = false;
+
+    if (myMoves.empty()) return false;
+
+    for (int i = 0; i < myMoves.n; i++) {
+        const Position& q = myMoves.position(myMoves.order[i]);
+
+        SearchMoveList replies;
+        legalSearchMoves(q, replies, false);
+
+        if (replies.empty()) {
+            if (inCheck(q, q.side)) return true;
+            continue;
+        }
+
+        bool worksAgainstEveryReply = true;
+
+        for (int j = 0; j < replies.n; j++) {
+            const Position& afterReply = replies.position(replies.order[j]);
+
+            if (!forceMateInMoves(afterReply, moves - 1, nodes)) {
+                worksAgainstEveryReply = false;
+                break;
+            }
+        }
+
+        if (worksAgainstEveryReply) return true;
+    }
+
+    return false;
+}
+#else
+#define forceMateInMovesRoot forceMateInMoves
+#endif
+
 // Print whether White can force mate from the initial position in n White moves.
 bool whiteCanForceMateIn(const Position& start, int n) {
     Position p = start;
@@ -891,7 +969,7 @@ bool whiteCanForceMateIn(const Position& start, int n) {
     computeKeys(p);
 
     long long nodes = 0;
-    bool ans = forceMateInMoves(p, n, nodes);
+    bool ans = forceMateInMovesRoot(p, n, nodes);
 
     cout << "White mate in " << n << ": "
          << (ans ? "YES" : "no")
@@ -908,7 +986,7 @@ bool blackCanForceMateAfterWhiteMove(const Position& start, int n) {
     p.side = WHITE;
     computeKeys(p);
 
-    MoveList whiteFirstMoves = legalMoves(p);
+    MoveList whiteFirstMoves = legalMovesRoot(p);
 
     bool blackForcesAfterAllWhiteMoves = true;
 
@@ -1002,6 +1080,7 @@ void printUsage(const char* prog) {
     cerr << "usage: " << prog << " [depth|first..last] [transposition-table-mb]\n"
          << "  depth range must be within 1..255\n"
          << "  build with OPTIONS=-DBOARD_RANKS=N for N in 4..8, default 5\n"
+         << "  add -DFORBID_TRIVIAL_4X8_WIN=1 to omit e2f3/g2f3 as 4x8 first moves\n"
          << "  examples: " << prog << " 5, " << prog << " 1..5 8\n";
 }
 
@@ -1043,7 +1122,8 @@ int main(int argc, char** argv) {
          << defaultfloat;
 
     cout << "\nLegal White first moves:\n";
-    for (const Move& m : legalMoves(start)) {
+    MoveList firstMoves = legalMovesRoot(start);
+    for (const Move& m : firstMoves) {
         cout << moveName(m) << " ";
     }
     cout << "\n\n";
