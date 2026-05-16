@@ -15,6 +15,7 @@ struct Move {
 struct Position {
     array<char, H * W> b{};
     Color side = WHITE;
+    int ep = -1; // En-passant target square, or -1.
 };
 
 int idx(int r, int c) { return r * W + c; }
@@ -154,10 +155,22 @@ bool inCheck(const Position& p, Color side) {
 Position makeMove(const Position& p, const Move& m) {
     Position q = p;
     char pc = q.b[m.from];
+    bool epCapture = tolower(pc) == 'p' &&
+                     m.to == p.ep &&
+                     isEmpty(q.b[m.to]) &&
+                     col(m.from) != col(m.to);
 
     q.b[m.from] = '.';
+    if (epCapture) {
+        q.b[idx(row(m.from), col(m.to))] = '.';
+    }
     q.b[m.to] = m.promo ? makePiece(p.side, m.promo) : pc;
     q.side = other(p.side);
+    q.ep = -1;
+
+    if (tolower(pc) == 'p' && abs(row(m.to) - row(m.from)) == 2) {
+        q.ep = idx((row(m.from) + row(m.to)) / 2, col(m.from));
+    }
 
     return q;
 }
@@ -196,6 +209,13 @@ vector<Move> pseudoMoves(const Position& p) {
                 } else {
                     moves.push_back({s, to, 0});
                 }
+
+                // Initial two-square pawn push.
+                int startRow = p.side == WHITE ? H - 2 : 1;
+                int rr2 = r + 2 * dir;
+                if (r == startRow && inb(rr2, c) && isEmpty(p.b[idx(rr2, c)])) {
+                    moves.push_back({s, idx(rr2, c), 0});
+                }
             }
 
             // Captures.
@@ -215,6 +235,12 @@ vector<Move> pseudoMoves(const Position& p) {
                     } else {
                         moves.push_back({s, to, 0});
                     }
+                }
+
+                if (to == p.ep && isEmpty(p.b[to]) &&
+                    oppColor(p.b[idx(r, cc)], p.side) &&
+                    tolower(p.b[idx(r, cc)]) == 'p') {
+                    moves.push_back({s, to, 0});
                 }
             }
         }
