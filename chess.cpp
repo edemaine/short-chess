@@ -1,54 +1,81 @@
 #include <bits/stdc++.h>
 using namespace std;
 
+/*
+ * Brute-force mate search for "short chess": ordinary chess pieces and
+ * movement on an 8-file by 5-rank board. The initial position is standard
+ * chess with three middle ranks removed, leaving one empty rank between the
+ * pawn rows.
+ *
+ * The program answers two bounded questions:
+ *   - Can White, moving first, force checkmate in N White moves?
+ *   - After any White first move, can Black force checkmate in N Black moves?
+ *
+ * The rules implemented are normal movement, check/checkmate, promotion,
+ * initial two-square pawn moves, and en passant. Castling and draw rules are
+ * intentionally omitted.
+ */
+
 static constexpr int H = 5;
 static constexpr int W = 8;
 
 enum Color { WHITE = 0, BLACK = 1 };
 
+// A move is encoded by source and destination square indices plus optional
+// promotion piece, stored as lowercase q/r/b/n independent of side.
 struct Move {
     int from;
     int to;
     char promo; // 0, 'q', 'r', 'b', 'n'
 };
 
+// Board squares contain piece letters, using uppercase for White, lowercase
+// for Black, and '.' for empty. ep stores the current en-passant target square.
 struct Position {
     array<char, H * W> b{};
     Color side = WHITE;
     int ep = -1; // En-passant target square, or -1.
 };
 
+// Convert between row/column coordinates and the flat board index.
 int idx(int r, int c) { return r * W + c; }
 int row(int s) { return s / W; }
 int col(int s) { return s % W; }
 
+// True when a row/column coordinate is on the 5x8 board.
 bool inb(int r, int c) {
     return r >= 0 && r < H && c >= 0 && c < W;
 }
 
+// Piece and color classification helpers.
 bool isWhite(char p) { return p >= 'A' && p <= 'Z'; }
 bool isBlack(char p) { return p >= 'a' && p <= 'z'; }
 bool isEmpty(char p) { return p == '.'; }
 bool isKing(char p) { return p == 'K' || p == 'k'; }
 
+// Return the opposite color.
 Color other(Color c) {
     return c == WHITE ? BLACK : WHITE;
 }
 
+// True when p is a non-empty piece belonging to side.
 bool sameColor(char p, Color side) {
     if (isEmpty(p)) return false;
     return side == WHITE ? isWhite(p) : isBlack(p);
 }
 
+// True when p is a non-empty enemy piece from side's perspective.
 bool oppColor(char p, Color side) {
     if (isEmpty(p)) return false;
     return side == WHITE ? isBlack(p) : isWhite(p);
 }
 
+// Make a side-colored piece from a lowercase piece letter.
 char makePiece(Color side, char lower) {
     return side == WHITE ? toupper(lower) : lower;
 }
 
+// Build the short-chess starting position.
 Position initial5x8() {
     Position p;
     p.b.fill('.');
@@ -70,6 +97,7 @@ Position initial5x8() {
     return p;
 }
 
+// Return side's king square, or -1 if no king is present.
 int findKing(const Position& p, Color side) {
     char k = side == WHITE ? 'K' : 'k';
     for (int i = 0; i < H * W; i++) {
@@ -78,6 +106,7 @@ int findKing(const Position& p, Color side) {
     return -1;
 }
 
+// True when sq is attacked by any piece of attacker.
 bool squareAttackedBy(const Position& p, int sq, Color attacker) {
     int r = row(sq), c = col(sq);
 
@@ -146,12 +175,15 @@ bool squareAttackedBy(const Position& p, int sq, Color attacker) {
     return false;
 }
 
+// True when side's king is currently attacked.
 bool inCheck(const Position& p, Color side) {
     int ksq = findKing(p, side);
     if (ksq < 0) return true;
     return squareAttackedBy(p, ksq, other(side));
 }
 
+// Apply a move and switch side to move. This also updates en-passant state
+// and removes the captured pawn for an en-passant capture.
 Position makeMove(const Position& p, const Move& m) {
     Position q = p;
     char pc = q.b[m.from];
@@ -175,6 +207,8 @@ Position makeMove(const Position& p, const Move& m) {
     return q;
 }
 
+// Add a non-pawn move if it is on board and does not land on a friendly piece
+// or king. Kings are never captured; checkmate is represented by no legal reply.
 void addMove(vector<Move>& moves, const Position& p, int from, int to, char promo = 0) {
     if (!inb(row(to), col(to))) return;
     if (sameColor(p.b[to], p.side)) return;
@@ -182,6 +216,8 @@ void addMove(vector<Move>& moves, const Position& p, int from, int to, char prom
     moves.push_back({from, to, promo});
 }
 
+// Generate pseudo-legal moves for p.side: piece movement is obeyed, but moves
+// that leave p.side in check are filtered later by legalMoves().
 vector<Move> pseudoMoves(const Position& p) {
     vector<Move> moves;
 
@@ -308,6 +344,7 @@ vector<Move> pseudoMoves(const Position& p) {
     return moves;
 }
 
+// Generate all fully legal moves for p.side.
 vector<Move> legalMoves(const Position& p) {
     vector<Move> out;
 
@@ -319,11 +356,13 @@ vector<Move> legalMoves(const Position& p) {
     return out;
 }
 
+// True when the side to move is in check and has no legal moves.
 bool isCheckmate(const Position& p) {
     if (!inCheck(p, p.side)) return false;
     return legalMoves(p).empty();
 }
 
+// Convert a board index to algebraic square notation such as "e4".
 string sqName(int s) {
     string out;
     out.push_back(char('a' + col(s)));
@@ -331,6 +370,8 @@ string sqName(int s) {
     return out;
 }
 
+// Convert a move to long algebraic coordinate notation, e.g. "e2e4" or
+// "a4a5q" for promotion.
 string moveName(const Move& m) {
     string s = sqName(m.from) + sqName(m.to);
     if (m.promo) s.push_back(m.promo);
@@ -376,6 +417,7 @@ bool forceMateInMoves(Position p, int moves, long long& nodes) {
     return false;
 }
 
+// Print whether White can force mate from the initial position in n White moves.
 bool whiteCanForceMateIn(const Position& start, int n) {
     Position p = start;
     p.side = WHITE;
@@ -426,6 +468,7 @@ bool blackCanForceMateAfterWhiteMove(const Position& start, int n) {
     return blackForcesAfterAllWhiteMoves;
 }
 
+// Print the board with short-chess ranks 1..5 and files a..h.
 void printBoard(const Position& p) {
     for (int r = 0; r < H; r++) {
         cout << H - r << "  ";
@@ -437,6 +480,7 @@ void printBoard(const Position& p) {
     cout << "   a b c d e f g h\n";
 }
 
+// Run the mate search up to maxN, defaulting to 5 unless overridden by argv[1].
 int main(int argc, char** argv) {
     Position start = initial5x8();
 
