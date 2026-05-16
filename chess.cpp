@@ -998,12 +998,14 @@ bool moveForcesMate(const Position& p, const Move& m, int moves) {
 // Print one forcing strategy tree for the side to move. This is used for small
 // top-level White mate reports: the root can have special first-move filtering,
 // while recursive calls use the normal legal move set and search.
-bool printMateStrategy(const Position& p, int moves, int moveNumber, int indent,
-                       bool root = false) {
+int printMateStrategy(const Position& p, int moves, int moveNumber, int indent,
+                      bool root = false) {
     MoveList myMoves = root ? legalMovesRoot(p) : legalMoves(p);
+    int strategies = 0;
 
     for (const Move& wm : myMoves) {
         if (!moveForcesMate(p, wm, moves)) continue;
+        strategies++;
 
         Position q = makeMove(p, wm);
         MoveList replies = legalMoves(q);
@@ -1013,7 +1015,8 @@ bool printMateStrategy(const Position& p, int moves, int moveNumber, int indent,
         if (replies.empty()) {
             cout << "#\n";
             printStrategyBoard(q, indent + 2);
-            return true;
+            if (!root) return 1;
+            continue;
         }
         cout << " (Black has " << replies.n << " legal "
              << (replies.n == 1 ? "reply" : "replies") << ")\n";
@@ -1024,17 +1027,17 @@ bool printMateStrategy(const Position& p, int moves, int moveNumber, int indent,
             printIndent(indent + 2);
             cout << "if Black " << moveName(reply) << ":\n";
             printStrategyBoard(afterReply, indent + 4);
-            if (!printMateStrategy(afterReply, moves - 1,
-                                   moveNumber + 1, indent + 4)) {
+            if (printMateStrategy(afterReply, moves - 1,
+                                  moveNumber + 1, indent + 4) == 0) {
                 printIndent(indent + 4);
                 cout << "(strategy not found)\n";
             }
         }
 
-        return true;
+        if (!root) return 1;
     }
 
-    return false;
+    return strategies;
 }
 
 // Print whether White can force mate from the initial position in n White moves.
@@ -1052,8 +1055,11 @@ bool whiteCanForceMateIn(const Position& start, int n) {
 
     if (ans && n <= 3) {
         cout << "\nWhite mate-in-" << n << " strategy:\n";
-        if (!printMateStrategy(p, n, 1, 0, true)) {
+        int strategies = printMateStrategy(p, n, 1, 0, true);
+        if (strategies == 0) {
             cout << "(strategy not found)\n";
+        } else {
+            cout << "Winning first moves: " << strategies << "\n";
         }
     }
 

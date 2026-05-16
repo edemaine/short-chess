@@ -90,12 +90,14 @@ White has two immediate winning moves. Can you find them?
   2  P P P P P P . P
   1  R N B Q K B N R
      a b c d e f g h
+
+Winning first moves: 2
 ```
 
 </details>
 
 With `FORBID_TRIVIAL_4X8_WIN=1`, those two first moves are excluded and White
-still has a mate in 3. Can you find it?
+still has a unique winning first move for mate in 3. Can you find it?
 
 <details>
 <summary>Show mate-in-3 strategy</summary>
@@ -135,6 +137,8 @@ still has a mate in 3. Can you find it?
           2  P . P P . P P P
           1  R . B Q K B N R
              a b c d e f g h
+
+Winning first moves: 1
 ```
 
 </details>
