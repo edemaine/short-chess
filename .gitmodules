@@ -1,0 +1,3 @@
+[submodule "figures/svgtiler"]
+	path = figures/svgtiler
+	url = https://github.com/edemaine/svgtiler.git

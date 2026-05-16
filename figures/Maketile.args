@@ -1,0 +1,5 @@
+# Use the upstream SVG Tiler chess example for board/piece rendering, then add
+# local rank/file labels around every diagram.
+svgtiler/examples/chess/map.coffee
+labels.coffee
+*.asc

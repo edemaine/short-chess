@@ -14,6 +14,8 @@ The rules implemented are normal movement, check/checkmate, promotion, initial
 two-square pawn moves, and en passant. Castling and draw rules are intentionally
 omitted.
 
+[Figures](figures) made with [SVG Tiler](https://github.com/edemaine/svgtiler).
+
 ## Build and Run
 
 ```sh
@@ -63,36 +65,20 @@ defaults to `8` MB.
 
 The 4×8 starting board is:
 
-```text
-4  r n b q k b n r
-3  p p p p p p p p
-2  P P P P P P P P
-1  R N B Q K B N R
-   a b c d e f g h
-```
+![4x8 starting board](figures/4x8-start.svg)
 
 White has two immediate winning moves. Can you find them?
 
 <details>
 <summary>Show White's winning moves</summary>
 
-```text
-1. White e2f3#
-  4  r n b q k b n r
-  3  p p p p p P p p
-  2  P P P P . P P P
-  1  R N B Q K B N R
-     a b c d e f g h
+1\. White e2f3#
 
-1. White g2f3#
-  4  r n b q k b n r
-  3  p p p p p P p p
-  2  P P P P P P . P
-  1  R N B Q K B N R
-     a b c d e f g h
+![4x8 e2f3 mate](figures/4x8-mate-e2f3.svg)
 
-Winning first moves: 2
-```
+1\. White g2f3#
+
+![4x8 g2f3 mate](figures/4x8-mate-g2f3.svg)
 
 </details>
 
@@ -102,44 +88,25 @@ still has a unique winning first move for mate in 3. Can you find it?
 <details>
 <summary>Show mate-in-3 strategy</summary>
 
-```text
-1. White b1c3 (Black has 1 legal reply)
-  4  r n b q k b n r
-  3  p p N p p p p p
-  2  P P P P P P P P
-  1  R . B Q K B N R
-     a b c d e f g h
+1\. White b1c3
 
-  if Black d4c3:
-    4  r n b . k b n r
-    3  p p q p p p p p
-    2  P P P P P P P P
-    1  R . B Q K B N R
-       a b c d e f g h
+![4x8 mate in 3 after b1c3](figures/4x8-mate3-1-b1c3.svg)
 
-    2. White e2f3 (Black has 1 legal reply)
-      4  r n b . k b n r
-      3  p p q p p P p p
-      2  P P P P . P P P
-      1  R . B Q K B N R
-         a b c d e f g h
+1\... Black d4c3 (only legal reply)
 
-      if Black e4d4:
-        4  r n b k . b n r
-        3  p p q p p P p p
-        2  P P P P . P P P
-        1  R . B Q K B N R
-           a b c d e f g h
+![4x8 mate in 3 after d4c3](figures/4x8-mate3-1-black-d4c3.svg)
 
-        3. White b2c3#
-          4  r n b k . b n r
-          3  p p P p p P p p
-          2  P . P P . P P P
-          1  R . B Q K B N R
-             a b c d e f g h
+2\. White e2f3
 
-Winning first moves: 1
-```
+![4x8 mate in 3 after e2f3](figures/4x8-mate3-2-e2f3.svg)
+
+2\... Black e4d4 (only legal reply)
+
+![4x8 mate in 3 after e4d4](figures/4x8-mate3-2-black-e4d4.svg)
+
+3\. White b2c3#
+
+![4x8 mate in 3 after b2c3 mate](figures/4x8-mate3-3-b2c3.svg)
 
 </details>
 
@@ -147,14 +114,7 @@ Winning first moves: 1
 
 The 5×8 starting board is:
 
-```text
-5  r n b q k b n r
-4  p p p p p p p p
-3  . . . . . . . .
-2  P P P P P P P P
-1  R N B Q K B N R
-   a b c d e f g h
-```
+![5x8 starting board](figures/5x8-start.svg)
 
 So far, this exhaustive search has confirmed that 5×8 chess has no winning
 strategy for White or Black up to mate-in-9.
