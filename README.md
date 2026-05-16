@@ -5,6 +5,7 @@ on an 8-file board with 4 or more ranks.
 The initial position is standard chess with middle ranks removed.
 On a 4×8 board, this means every square is occupied by a piece.
 On a 5×8 board, this leaves one empty rank between the pawn rows.
+This chess variant was introduced by Joseph Palin as a way to approach 8×8 chess.
 
 The program answers two questions for a number *n*:
 
@@ -23,7 +24,7 @@ The 4×8 starting board is:
 
 ![4x8 starting board](figures/4x8-start.svg)
 
-White has two immediate winning moves. Can you find them?
+White has two immediate winning moves (mate-in-1). Can you find them?
 
 <details>
 <summary>Show White's mate-in-1 moves</summary>
@@ -38,8 +39,9 @@ White has two immediate winning moves. Can you find them?
 
 </details>
 
-With `FORBID_TRIVIAL_4X8_WIN=1`, those two first moves are excluded and White
-still has a unique winning first move for mate-in-3. Can you find it?
+If you forbid those two trivial winning first moves
+(as suggested by Martin Demaine and implemented in the code by `FORBID_TRIVIAL_4X8_WIN=1`),
+White has a unique winning first move for mate-in-3. Can you find it?
 
 <details>
 <summary>Show mate-in-3 strategy</summary>
