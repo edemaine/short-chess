@@ -71,7 +71,10 @@ The 4x8 starting board is:
    a b c d e f g h
 ```
 
-White has two immediate winning moves:
+White has two immediate winning moves. Can you find them?
+
+<details>
+<summary>Show White's winning moves</summary>
 
 ```text
 1. White e2f3#
@@ -89,8 +92,13 @@ White has two immediate winning moves:
      a b c d e f g h
 ```
 
+</details>
+
 With `FORBID_TRIVIAL_4X8_WIN=1`, those two first moves are excluded and White
-still has a mate in 3:
+still has a mate in 3. Can you find it?
+
+<details>
+<summary>Show mate-in-3 strategy</summary>
 
 ```text
 1. White b1c3 (Black has 1 legal reply)
@@ -128,6 +136,8 @@ still has a mate in 3:
           1  R . B Q K B N R
              a b c d e f g h
 ```
+
+</details>
 
 ## Main Optimizations
 
