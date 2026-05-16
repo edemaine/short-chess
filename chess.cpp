@@ -824,6 +824,7 @@ bool forceMateInMoves(Position p, int moves, long long& nodes) {
 bool whiteCanForceMateIn(const Position& start, int n) {
     Position p = start;
     p.side = WHITE;
+    computeKeys(p);
 
     long long nodes = 0;
     bool ans = forceMateInMoves(p, n, nodes);
@@ -841,6 +842,7 @@ bool whiteCanForceMateIn(const Position& start, int n) {
 bool blackCanForceMateAfterWhiteMove(const Position& start, int n) {
     Position p = start;
     p.side = WHITE;
+    computeKeys(p);
 
     MoveList whiteFirstMoves = legalMoves(p);
 
@@ -886,19 +888,23 @@ void printBoard(const Position& p) {
 // Run the mate search up to maxN, defaulting to 5 unless overridden by argv[1].
 // argv[2] optionally sets the transposition table size in MB, defaulting to 8.
 int main(int argc, char** argv) {
-    Position start = initial5x8();
-
-    printBoard(start);
-
     int maxN = 5;
     if (argc >= 2) {
         maxN = atoi(argv[1]);
+    }
+    if (maxN > 255) {
+        cerr << "error: max-depth must be <= 255\n";
+        return 1;
     }
 
     size_t ttMB = 8;
     if (argc >= 3) {
         ttMB = strtoull(argv[2], nullptr, 10);
     }
+
+    Position start = initial5x8();
+
+    printBoard(start);
     tt.resizeMB(ttMB);
 
     cout << fixed << setprecision(2)
