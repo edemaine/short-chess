@@ -943,15 +943,75 @@ void printBoard(const Position& p) {
     cout << "   a b c d e f g h\n";
 }
 
-// Run the mate search up to maxN, defaulting to 5 unless overridden by argv[1].
+struct DepthRange {
+    int first = 1;
+    int last = 5;
+};
+
+bool parseDepth(const string& s, int& out) {
+    if (s.empty()) return false;
+
+    int value = 0;
+    for (char ch : s) {
+        if (!isdigit(static_cast<unsigned char>(ch))) return false;
+        value = value * 10 + (ch - '0');
+        if (value > 255) return false;
+    }
+
+    if (value < 1) return false;
+    out = value;
+    return true;
+}
+
+bool parseDepthRange(const string& spec, DepthRange& range) {
+    size_t dots = spec.find("..");
+    if (dots == string::npos) {
+        int n = 0;
+        if (!parseDepth(spec, n)) return false;
+        range.first = n;
+        range.last = n;
+        return true;
+    }
+
+    if (spec.find("..", dots + 2) != string::npos) return false;
+
+    int first = 0;
+    int last = 0;
+    if (!parseDepth(spec.substr(0, dots), first) ||
+        !parseDepth(spec.substr(dots + 2), last) ||
+        first > last) {
+        return false;
+    }
+
+    range.first = first;
+    range.last = last;
+    return true;
+}
+
+void printUsage(const char* prog) {
+    cerr << "usage: " << prog << " [depth|first..last] [transposition-table-mb]\n"
+         << "  depth range must be within 1..255\n"
+         << "  examples: " << prog << " 5, " << prog << " 1..5 8\n";
+}
+
+// Run the mate search for one depth or an inclusive range of depths.
 // argv[2] optionally sets the transposition table size in MB, defaulting to 8.
 int main(int argc, char** argv) {
-    int maxN = 5;
-    if (argc >= 2) {
-        maxN = atoi(argv[1]);
+    if (argc > 3) {
+        printUsage(argv[0]);
+        return 1;
     }
-    if (maxN > 255) {
-        cerr << "error: max-depth must be <= 255\n";
+
+    DepthRange depths;
+    if (argc >= 2) {
+        if (!parseDepthRange(argv[1], depths)) {
+            cerr << "error: invalid depth range '" << argv[1] << "'\n";
+            printUsage(argv[0]);
+            return 1;
+        }
+    }
+    if (depths.last > 255) {
+        cerr << "error: depth must be <= 255\n";
         return 1;
     }
 
@@ -978,12 +1038,12 @@ int main(int argc, char** argv) {
     cout << "\n\n";
 
     cout << "=== White forced mates ===\n";
-    for (int n = 1; n <= maxN; n++) {
+    for (int n = depths.first; n <= depths.last; n++) {
         whiteCanForceMateIn(start, n);
     }
 
     cout << "\n=== Black forced mates after White's first move ===\n";
-    for (int n = 1; n <= maxN; n++) {
+    for (int n = depths.first; n <= depths.last; n++) {
         blackCanForceMateAfterWhiteMove(start, n);
     }
 

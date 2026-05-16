@@ -17,7 +17,7 @@ omitted.
 
 ```sh
 make
-./chess [max-depth] [transposition-table-mb]
+./chess [depth|first..last] [transposition-table-mb]
 ```
 
 By default, transposition-table entries store two independent 64-bit
@@ -35,12 +35,13 @@ same memory budget.
 Examples:
 
 ```sh
-./chess 5 8   # search through mate-in-5 with an 8 MB transposition table
-./chess 6 0   # search through mate-in-6 with the transposition table disabled
+./chess 5 8     # search just mate-in-5 with an 8 MB transposition table
+./chess 1..5 8  # search mate-in-1, mate-in-2, ..., mate-in-5
+./chess 6 0     # search just mate-in-6 with the transposition table disabled
 ```
 
-If omitted, `max-depth` defaults to `5` and the transposition table defaults to
-`8` MB.
+If omitted, the depth range defaults to `1..5` and the transposition table
+defaults to `8` MB.
 
 ## Main Optimizations
 
