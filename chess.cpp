@@ -28,6 +28,7 @@ bool inb(int r, int c) {
 bool isWhite(char p) { return p >= 'A' && p <= 'Z'; }
 bool isBlack(char p) { return p >= 'a' && p <= 'z'; }
 bool isEmpty(char p) { return p == '.'; }
+bool isKing(char p) { return p == 'K' || p == 'k'; }
 
 Color other(Color c) {
     return c == WHITE ? BLACK : WHITE;
@@ -164,6 +165,7 @@ Position makeMove(const Position& p, const Move& m) {
 void addMove(vector<Move>& moves, const Position& p, int from, int to, char promo = 0) {
     if (!inb(row(to), col(to))) return;
     if (sameColor(p.b[to], p.side)) return;
+    if (isKing(p.b[to])) return;
     moves.push_back({from, to, promo});
 }
 
@@ -202,7 +204,7 @@ vector<Move> pseudoMoves(const Position& p) {
                 if (!inb(rr, cc)) continue;
 
                 int to = idx(rr, cc);
-                if (oppColor(p.b[to], p.side)) {
+                if (oppColor(p.b[to], p.side) && !isKing(p.b[to])) {
                     bool promote = (p.side == WHITE && rr == 0) ||
                                    (p.side == BLACK && rr == H - 1);
 
@@ -264,6 +266,8 @@ vector<Move> pseudoMoves(const Position& p) {
 
                     if (sameColor(p.b[to], p.side)) break;
 
+                    if (isKing(p.b[to])) break;
+
                     moves.push_back({s, to, 0});
 
                     if (oppColor(p.b[to], p.side)) break;
@@ -312,7 +316,8 @@ string moveName(const Move& m) {
 bool forceMateInMoves(Position p, int moves, long long& nodes) {
     nodes++;
 
-    if (isCheckmate(p)) return true;
+    // p.side is the side trying to force mate at this node.
+    if (isCheckmate(p)) return false;
     if (moves <= 0) return false;
 
     vector<Move> myMoves = legalMoves(p);
