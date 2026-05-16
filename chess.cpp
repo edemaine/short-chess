@@ -408,6 +408,10 @@ Position makeMove(const Position& p, const Move& m) {
     char captured = epCapture ? q.b[epCaptureSquare] : q.b[m.to];
     char placed = m.promo ? makePiece(p.side, m.promo) : pc;
     int capturedSquare = epCapture ? epCaptureSquare : m.to;
+    int pcIndex = pieceIndex(pc);
+    int placedIndex = pieceIndex(placed);
+    assert(pcIndex >= 0);
+    assert(placedIndex >= 0);
 
     if (q.ep >= 0) {
         q.key ^= z.ep[q.ep];
@@ -415,19 +419,21 @@ Position makeMove(const Position& p, const Move& m) {
         q.key2 ^= z.ep2[q.ep];
 #endif
     }
-    q.key ^= z.piece[pieceIndex(pc)][m.from];
+    q.key ^= z.piece[pcIndex][m.from];
 #if TT_DOUBLE_HASH
-    q.key2 ^= z.piece2[pieceIndex(pc)][m.from];
+    q.key2 ^= z.piece2[pcIndex][m.from];
 #endif
     if (!isEmpty(captured)) {
-        q.key ^= z.piece[pieceIndex(captured)][capturedSquare];
+        int capturedIndex = pieceIndex(captured);
+        assert(capturedIndex >= 0);
+        q.key ^= z.piece[capturedIndex][capturedSquare];
 #if TT_DOUBLE_HASH
-        q.key2 ^= z.piece2[pieceIndex(captured)][capturedSquare];
+        q.key2 ^= z.piece2[capturedIndex][capturedSquare];
 #endif
     }
-    q.key ^= z.piece[pieceIndex(placed)][m.to];
+    q.key ^= z.piece[placedIndex][m.to];
 #if TT_DOUBLE_HASH
-    q.key2 ^= z.piece2[pieceIndex(placed)][m.to];
+    q.key2 ^= z.piece2[placedIndex][m.to];
 #endif
     q.key ^= z.blackToMove;
 #if TT_DOUBLE_HASH
