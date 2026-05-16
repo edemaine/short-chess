@@ -1,6 +1,7 @@
 #include <bits/stdc++.h>
 using namespace std;
 
+// Board height. Valid values are 4..8; default is 5x8 short chess.
 #ifndef BOARD_RANKS
 #define BOARD_RANKS 5
 #endif
@@ -12,10 +13,14 @@ static_assert(H >= 4 && H <= 8, "BOARD_RANKS must be in 4..8");
 static constexpr uint64_t BOARD_MASK =
     N_SQUARES == 64 ? ~0ULL : ((1ULL << N_SQUARES) - 1);
 
+// Whether to store two independent Zobrist keys per transposition-table entry.
+// Set to 0 to fit more entries with weaker collision protection.
 #ifndef TT_DOUBLE_HASH
 #define TT_DOUBLE_HASH 1
 #endif
 
+// Whether to omit White's two immediate 4x8 winning first moves from root
+// search and root move listings, exposing the next shortest strategy.
 #ifndef FORBID_TRIVIAL_4X8_WIN
 #define FORBID_TRIVIAL_4X8_WIN 0
 #endif
