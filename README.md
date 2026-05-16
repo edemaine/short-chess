@@ -79,7 +79,8 @@ The 5×8 starting board is:
 ![5x8 starting board](figures/5x8-start.svg)
 
 So far, this exhaustive search has confirmed that 5×8 chess has no winning
-strategy for White or Black up to mate-in-9 (18 or 19 total moves).
+strategy for White or Black up to mate-in-9 (9 White moves and 8 or 9 Black
+moves, for a total of 17 or 18 plies).
 
 ## Build and Run
 
