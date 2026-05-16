@@ -1,14 +1,15 @@
 # Short Chess Mate Search
 
-Brute-force mate search for "short chess": ordinary chess pieces and movement
-on an 8-file board with 4 or more ranks. By default it uses a 5-rank board.
-The initial position is standard chess with middle ranks removed; on the
-default 5×8 board, this leaves one empty rank between the pawn rows.
+Brute-force mate search for ***short chess***: ordinary chess pieces and movement
+on an 8-file board with 4 or more ranks.
+The initial position is standard chess with middle ranks removed.
+On a 4×8 board, this means every square is occupied by a piece.
+On a 5×8 board, this leaves one empty rank between the pawn rows.
 
-The program answers two bounded questions:
+The program answers two questions for a number *n*:
 
-- Can White, moving first, force checkmate in N White moves?
-- After any White first move, can Black force checkmate in N Black moves?
+- Can White, moving first, force checkmate in *n* White moves?
+- After any White first move, can Black force checkmate in *n* Black moves?
 
 The rules implemented are normal movement, check/checkmate, promotion, initial
 two-square pawn moves, and en passant. Castling and draw rules are intentionally
