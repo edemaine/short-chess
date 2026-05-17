@@ -1093,6 +1093,7 @@ bool blackCanForceMateAfterWhiteMove(const Position& start, int n) {
 
         if (!blackForces) {
             blackForcesAfterAllWhiteMoves = false;
+            break;
         }
     }
 
