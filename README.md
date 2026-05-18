@@ -131,6 +131,7 @@ Examples:
 ./chess --depth 6 --tt 0  # search depth 6 with the transposition table disabled
 ./chess --depth 3 --goal material:300 --weights shannon  # force +3 pawns
 ./chess --depth 3 --goal material --weights shannon  # maximize guaranteed material
+./chess --player black  # run only the Black-after-White-first-move search
 ```
 
 Options:
@@ -140,6 +141,7 @@ Options:
 -t, --tt MB              transposition table size in MB (default 8; 0 disables)
 -g, --goal GOAL          mate, material, or material:K (default mate)
 -w, --weights NAME       shannon, turing, coxeter, or kaufman (default shannon)
+-p, --player NAME        both, white, or black (default both)
 -h, --help               show usage
 ```
 

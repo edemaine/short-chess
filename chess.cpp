@@ -1488,6 +1488,8 @@ struct DepthRange {
     int last = 5;
 };
 
+enum class StartPlayerFilter { Both, White, Black };
+
 bool parseDepth(const string& s, int& out) {
     if (s.empty()) return false;
 
@@ -1586,9 +1588,32 @@ bool parseGoal(const string& spec, SearchGoal& goal) {
     return false;
 }
 
+bool parseStartPlayer(const string& spec, StartPlayerFilter& startPlayer) {
+    if (spec == "both") {
+        startPlayer = StartPlayerFilter::Both;
+    } else if (spec == "white") {
+        startPlayer = StartPlayerFilter::White;
+    } else if (spec == "black") {
+        startPlayer = StartPlayerFilter::Black;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+string startPlayerDescription(StartPlayerFilter startPlayer) {
+    switch (startPlayer) {
+        case StartPlayerFilter::Both: return "both";
+        case StartPlayerFilter::White: return "white";
+        case StartPlayerFilter::Black: return "black";
+    }
+    return "both";
+}
+
 struct ProgramOptions {
     DepthRange depths;
     size_t tt = 8;
+    StartPlayerFilter startPlayer = StartPlayerFilter::Both;
 };
 
 void printUsage(const char* prog, ostream& out = cerr) {
@@ -1601,12 +1626,15 @@ void printUsage(const char* prog, ostream& out = cerr) {
         << " (default mate)\n"
         << "  -w, --weights NAME       shannon, turing, coxeter, or kaufman"
         << " (default shannon)\n"
+        << "  -p, --player NAME        both, white, or black"
+        << " (default both)\n"
         << "  -h, --help               show this help\n"
         << "  material K is measured in the selected centipawn weight scale\n"
         << "  build with OPTIONS=-DBOARD_RANKS=N for N in 4..8, default 5\n"
         << "  add -DFORBID_TRIVIAL_4X8_WIN=1 to omit e2f3/g2f3 as 4x8 first moves\n"
         << "  examples: " << prog << " -d 5 -t 8, "
-        << prog << " --depth 1..5 --goal material --weights shannon\n";
+        << prog << " --depth 1..5 --goal material --weights shannon, "
+        << prog << " --player black\n";
 }
 
 bool optionNeedsValue(const char* prog, const string& option, int argc,
@@ -1698,6 +1726,22 @@ bool parseOptions(int argc, char** argv, ProgramOptions& options,
                 printUsage(argv[0]);
                 return false;
             }
+        } else if (arg == "-p" || arg == "--player") {
+            if (!optionNeedsValue(argv[0], arg, argc, argv, i, value)) {
+                return false;
+            }
+            if (!parseStartPlayer(value, options.startPlayer)) {
+                cerr << "error: invalid player '" << value << "'\n";
+                printUsage(argv[0]);
+                return false;
+            }
+        } else if (arg.rfind("--player=", 0) == 0) {
+            value = arg.substr(9);
+            if (!parseStartPlayer(value, options.startPlayer)) {
+                cerr << "error: invalid player '" << value << "'\n";
+                printUsage(argv[0]);
+                return false;
+            }
         } else {
             cerr << "error: unexpected positional argument or option '" << arg
                  << "'\n";
@@ -1728,7 +1772,9 @@ int main(int argc, char** argv) {
     tt.resizeMB(options.tt);
 
     cout << "\nGoal: " << goalDescription(currentGoal)
-         << "\nWeights: " << weightsDescription(currentWeights) << "\n";
+         << "\nWeights: " << weightsDescription(currentWeights)
+         << "\nStart player: " << startPlayerDescription(options.startPlayer)
+         << "\n";
 
     cout << fixed << setprecision(2)
          << "\nTransposition table: "
@@ -1743,26 +1789,38 @@ int main(int argc, char** argv) {
     }
     cout << "\n\n";
 
+    const bool runWhite = options.startPlayer != StartPlayerFilter::Black;
+    const bool runBlack = options.startPlayer != StartPlayerFilter::White;
+
     if (currentGoal.kind == GoalKind::MaterialValue) {
-        cout << "=== White max material ===\n";
-        for (int n = options.depths.first; n <= options.depths.last; n++) {
-            whiteMaterialValueIn(start, n);
+        if (runWhite) {
+            cout << "=== White max material ===\n";
+            for (int n = options.depths.first; n <= options.depths.last; n++) {
+                whiteMaterialValueIn(start, n);
+            }
         }
 
-        cout << "\n=== Black max material after White's first move ===\n";
-        for (int n = options.depths.first; n <= options.depths.last; n++) {
-            blackMaterialValueAfterWhiteMove(start, n);
+        if (runBlack) {
+            cout << "\n=== Black max material after White's first move ===\n";
+            for (int n = options.depths.first; n <= options.depths.last; n++) {
+                blackMaterialValueAfterWhiteMove(start, n);
+            }
         }
     } else {
-        cout << "=== White forced " << goalDescription(currentGoal) << " ===\n";
-        for (int n = options.depths.first; n <= options.depths.last; n++) {
-            whiteCanForceGoalIn(start, n);
+        if (runWhite) {
+            cout << "=== White forced " << goalDescription(currentGoal)
+                 << " ===\n";
+            for (int n = options.depths.first; n <= options.depths.last; n++) {
+                whiteCanForceGoalIn(start, n);
+            }
         }
 
-        cout << "\n=== Black forced " << goalDescription(currentGoal)
-             << " after White's first move ===\n";
-        for (int n = options.depths.first; n <= options.depths.last; n++) {
-            blackCanForceGoalAfterWhiteMove(start, n);
+        if (runBlack) {
+            cout << "\n=== Black forced " << goalDescription(currentGoal)
+                 << " after White's first move ===\n";
+            for (int n = options.depths.first; n <= options.depths.last; n++) {
+                blackCanForceGoalAfterWhiteMove(start, n);
+            }
         }
     }
 
