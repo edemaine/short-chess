@@ -84,10 +84,6 @@ So far, this exhaustive search has confirmed that 5×8 chess has no winning
 strategy for White or Black up to mate-in-11
 (11 White moves and 10 or 11 Black moves, for a total of 20 or 21 plies).
 
-More interesting, White can force a material advantage of 500 (one Rook
-in [Shannon's point values](https://www.chessprogramming.org/Point_Value))
-after the first 7 White moves.
-
 ## Building
 
 ```sh
