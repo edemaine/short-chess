@@ -134,6 +134,7 @@ Examples:
 ./chess --depth 1..5 --tt 8  # search depths 1, 2, 3, 4, and 5
 ./chess --depth 6 --tt 0  # search depth 6 with the transposition table disabled
 ./chess --depth 3 --goal material:300 --weights shannon  # force +3 pawns
+./chess --depth 3 --goal material --weights shannon  # maximize guaranteed material
 ```
 
 Options:
@@ -141,17 +142,20 @@ Options:
 ```text
 -d, --depth N|A..B       own-move depth range, within 1..255 (default 1..5)
 -t, --tt MB              transposition table size in MB (default 8; 0 disables)
--g, --goal GOAL          mate or material:K (default mate)
+-g, --goal GOAL          mate, material, or material:K (default mate)
 -w, --weights NAME       shannon, turing, coxeter, or kaufman (default shannon)
 -h, --help               show usage
 ```
 
-The `mate` goal is the original search objective. The `material:K` goal asks
-whether the side to move can force a material advantage of at least `K` at the
-search horizon, no matter how the opponent replies. Checkmate still satisfies
-the goal early. `K` is measured in the selected centipawn weight scale, so under
-the default Shannon weights `material:300` means a three-pawn advantage or
-equivalent.
+The `mate` goal asks whether the side to move can force checkmate within the
+specified number of its own moves. The `material` goal computes the maximum
+material advantage the side to move can force at the search horizon, with
+checkmate reported as `+infinity` and getting checkmated as `-infinity`. The
+`material:K` goal asks whether the side to move can force a material advantage
+of at least `K` at the search horizon, no matter how the opponent replies.
+Checkmate still satisfies `material:K` early. Material values are measured in
+the selected centipawn weight scale, so under the default Shannon weights
+`material:300` means a three-pawn advantage or equivalent.
 
 The material weights are from the
 [Chessprogramming wiki point-value table](https://www.chessprogramming.org/Point_Value).

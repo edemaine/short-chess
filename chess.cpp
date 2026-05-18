@@ -799,6 +799,7 @@ void legalSearchMoves(const Position& p, SearchMoveList& out,
 }
 
 uint64_t ttContextKey = 0;
+bool ttExactDepth = false;
 
 struct TTEntry {
     uint64_t key = 0;
@@ -806,7 +807,8 @@ struct TTEntry {
     uint64_t key2 = 0;
 #endif
     uint8_t moves = 0;
-    int8_t result = 0; // 0 = empty, 1 = false, 2 = true.
+    int value = 0;
+    int8_t result = 0; // 0 = empty, 1 = false, 2 = true, 3 = exact value.
 };
 
 struct TranspositionTable {
@@ -860,10 +862,34 @@ struct TranspositionTable {
 #if TT_DOUBLE_HASH
             e.key2 == key2 &&
 #endif
-            ((e.result == 2 && e.moves <= moves) ||
-             (e.result == 1 && e.moves >= moves))) {
+            (ttExactDepth
+             ? e.moves == moves
+             : ((e.result == 2 && e.moves <= moves) ||
+                (e.result == 1 && e.moves >= moves)))) {
             hits++;
             result = e.result == 2;
+            return true;
+        }
+
+        return false;
+    }
+
+    bool lookupValue(const Position& p, int moves, int& value) {
+        if (!enabled()) return false;
+
+        uint64_t key = cacheKey(p);
+#if TT_DOUBLE_HASH
+        uint64_t key2 = cacheKey2(p);
+#endif
+        const TTEntry& e = table[key % table.size()];
+        if (e.result == 3 &&
+            e.key == key &&
+#if TT_DOUBLE_HASH
+            e.key2 == key2 &&
+#endif
+            e.moves == moves) {
+            hits++;
+            value = e.value;
             return true;
         }
 
@@ -878,7 +904,8 @@ struct TranspositionTable {
         uint64_t key2 = cacheKey2(p);
 #endif
         TTEntry& e = table[key % table.size()];
-        if (e.result != 0 &&
+        if (!ttExactDepth &&
+            e.result != 0 &&
             e.key == key &&
 #if TT_DOUBLE_HASH
             e.key2 == key2 &&
@@ -906,6 +933,34 @@ struct TranspositionTable {
         e.result = result ? 2 : 1;
         stores++;
     }
+
+    void storeValue(const Position& p, int moves, int value) {
+        if (!enabled()) return;
+
+        uint64_t key = cacheKey(p);
+#if TT_DOUBLE_HASH
+        uint64_t key2 = cacheKey2(p);
+#endif
+        TTEntry& e = table[key % table.size()];
+        if (e.result != 0 &&
+            (e.key != key ||
+#if TT_DOUBLE_HASH
+             e.key2 != key2 ||
+#endif
+             e.moves != moves) &&
+            e.moves > moves) {
+            return;
+        }
+
+        e.key = key;
+#if TT_DOUBLE_HASH
+        e.key2 = key2;
+#endif
+        e.moves = uint8_t(moves);
+        e.value = value;
+        e.result = 3;
+        stores++;
+    }
 };
 
 TranspositionTable tt;
@@ -918,7 +973,7 @@ bool isCheckmate(const Position& p) {
     return moves.empty();
 }
 
-enum class GoalKind { Mate, Material };
+enum class GoalKind { Mate, MaterialThreshold, MaterialValue };
 
 struct SearchGoal {
     GoalKind kind = GoalKind::Mate;
@@ -927,10 +982,12 @@ struct SearchGoal {
 
 SearchGoal currentGoal;
 Color currentAttacker = WHITE;
+static constexpr int MATERIAL_INF = 1000000000;
 
 void setCurrentAttacker(Color attacker) {
     currentAttacker = attacker;
-    if (currentGoal.kind == GoalKind::Material) {
+    ttExactDepth = currentGoal.kind == GoalKind::MaterialThreshold;
+    if (currentGoal.kind != GoalKind::Mate) {
         ttContextKey = attacker == WHITE ? 0x5f7c2e8d9a4316b0ULL
                                          : 0xb8d13a64c2f09e57ULL;
     } else {
@@ -956,6 +1013,7 @@ int materialBalance(const Position& p, Color side) {
 
 string goalDescription(const SearchGoal& goal) {
     if (goal.kind == GoalKind::Mate) return "mate";
+    if (goal.kind == GoalKind::MaterialValue) return "max material";
 
     ostringstream out;
     out << "material >= " << goal.materialThreshold;
@@ -964,6 +1022,12 @@ string goalDescription(const SearchGoal& goal) {
 
 bool materialGoalReached(const Position& p, Color attacker) {
     return materialBalance(p, attacker) >= currentGoal.materialThreshold;
+}
+
+string materialValueDescription(int value) {
+    if (value >= MATERIAL_INF) return "+infinity";
+    if (value <= -MATERIAL_INF) return "-infinity";
+    return to_string(value);
 }
 
 // Convert a board index to algebraic square notation such as "e4".
@@ -991,7 +1055,7 @@ bool forceGoalInMoves(const Position& p, int moves, long long& nodes) {
 
     // p.side is the side trying to force the goal at this node.
     if (moves <= 0) {
-        return currentGoal.kind == GoalKind::Material &&
+        return currentGoal.kind == GoalKind::MaterialThreshold &&
                materialGoalReached(p, currentAttacker);
     }
 
@@ -1052,7 +1116,7 @@ bool forceGoalInMovesRoot(const Position& p, int moves, long long& nodes) {
     nodes++;
 
     if (moves <= 0) {
-        return currentGoal.kind == GoalKind::Material &&
+        return currentGoal.kind == GoalKind::MaterialThreshold &&
                materialGoalReached(p, currentAttacker);
     }
 
@@ -1092,6 +1156,107 @@ bool forceGoalInMovesRoot(const Position& p, int moves, long long& nodes) {
 }
 #else
 #define forceGoalInMovesRoot forceGoalInMoves
+#endif
+
+int materialValueInMoves(const Position& p, int moves, long long& nodes) {
+    nodes++;
+
+    if (moves <= 0) return materialBalance(p, currentAttacker);
+
+    int cached = 0;
+    if (tt.lookupValue(p, moves, cached)) {
+        return cached;
+    }
+
+    SearchMoveList myMoves;
+    legalSearchMoves(p, myMoves, true);
+    if (myMoves.empty()) {
+        int value = inCheck(p, p.side)
+                    ? -MATERIAL_INF
+                    : materialBalance(p, currentAttacker);
+        tt.storeValue(p, moves, value);
+        return value;
+    }
+
+    int best = -MATERIAL_INF;
+    for (int i = 0; i < myMoves.n; i++) {
+        const Position& q = myMoves.position(myMoves.order[i]);
+
+        SearchMoveList replies;
+        legalSearchMoves(q, replies, false);
+
+        int moveValue = MATERIAL_INF;
+        if (replies.empty()) {
+            moveValue = inCheck(q, q.side)
+                        ? MATERIAL_INF
+                        : materialBalance(q, currentAttacker);
+        } else {
+            for (int j = 0; j < replies.n; j++) {
+                const Position& afterReply =
+                    replies.position(replies.order[j]);
+                int value = materialValueInMoves(afterReply, moves - 1,
+                                                 nodes);
+                moveValue = min(moveValue, value);
+                if (moveValue == -MATERIAL_INF) break;
+            }
+        }
+
+        best = max(best, moveValue);
+        if (best == MATERIAL_INF) break;
+    }
+
+    tt.storeValue(p, moves, best);
+    return best;
+}
+
+#if FORBID_TRIVIAL_4X8_WIN
+int materialValueInMovesRoot(const Position& p, int moves, long long& nodes) {
+    nodes++;
+
+    if (moves <= 0) return materialBalance(p, currentAttacker);
+
+    SearchMoveList myMoves;
+    forbidTrivial4x8WinForNextMoveGen = true;
+    legalSearchMoves(p, myMoves, true);
+    forbidTrivial4x8WinForNextMoveGen = false;
+
+    if (myMoves.empty()) {
+        return inCheck(p, p.side)
+               ? -MATERIAL_INF
+               : materialBalance(p, currentAttacker);
+    }
+
+    int best = -MATERIAL_INF;
+    for (int i = 0; i < myMoves.n; i++) {
+        const Position& q = myMoves.position(myMoves.order[i]);
+
+        SearchMoveList replies;
+        legalSearchMoves(q, replies, false);
+
+        int moveValue = MATERIAL_INF;
+        if (replies.empty()) {
+            moveValue = inCheck(q, q.side)
+                        ? MATERIAL_INF
+                        : materialBalance(q, currentAttacker);
+        } else {
+            for (int j = 0; j < replies.n; j++) {
+                const Position& afterReply =
+                    replies.position(replies.order[j]);
+                int value = materialValueInMoves(afterReply, moves - 1,
+                                                 nodes);
+                moveValue = min(moveValue, value);
+                if (moveValue == -MATERIAL_INF) break;
+            }
+        }
+
+        best = max(best, moveValue);
+        if (best == MATERIAL_INF) break;
+    }
+
+    return best;
+}
+#else
+#define materialValueInMovesRoot materialValueInMoves
 #endif
 
 void printIndent(int n) {
@@ -1195,6 +1360,22 @@ bool whiteCanForceGoalIn(const Position& start, int n) {
     return ans;
 }
 
+int whiteMaterialValueIn(const Position& start, int n) {
+    Position p = start;
+    p.side = WHITE;
+    computeKeys(p);
+    setCurrentAttacker(WHITE);
+
+    long long nodes = 0;
+    int value = materialValueInMovesRoot(p, n, nodes);
+
+    cout << "White max material in " << n << ": "
+         << materialValueDescription(value)
+         << ", nodes=" << nodes << "\n";
+
+    return value;
+}
+
 // This answers:
 // After White's first move, can Black force the configured goal in n Black moves
 // no matter which first move White chooses?
@@ -1236,6 +1417,37 @@ bool blackCanForceGoalAfterWhiteMove(const Position& start, int n) {
          << "\n";
 
     return blackForcesAfterAllWhiteMoves;
+}
+
+int blackMaterialValueAfterWhiteMove(const Position& start, int n) {
+    Position p = start;
+    p.side = WHITE;
+    computeKeys(p);
+
+    MoveList whiteFirstMoves = legalMovesRoot(p);
+
+    int overall = MATERIAL_INF;
+
+    cout << "\nTesting Black max material in " << n
+         << " after White's first move:\n";
+
+    for (const Move& wm : whiteFirstMoves) {
+        Position afterWhite = makeMove(p, wm);
+        setCurrentAttacker(BLACK);
+
+        long long nodes = 0;
+        int value = materialValueInMoves(afterWhite, n, nodes);
+        overall = min(overall, value);
+
+        cout << "1. " << moveName(wm)
+             << " : Black guarantees " << materialValueDescription(value)
+             << ", nodes=" << nodes << "\n";
+    }
+
+    cout << "Overall Black max material in " << n << ": "
+         << materialValueDescription(overall) << "\n";
+
+    return overall;
 }
 
 // Print the board with ranks 1..H and files a..h.
@@ -1339,13 +1551,19 @@ bool parseGoal(const string& spec, SearchGoal& goal) {
         return true;
     }
 
+    if (spec == "material") {
+        goal.kind = GoalKind::MaterialValue;
+        goal.materialThreshold = 0;
+        return true;
+    }
+
     const string prefix = "material:";
     if (spec.rfind(prefix, 0) == 0) {
         int threshold = 0;
         if (!parseNonNegativeInt(spec.substr(prefix.size()), threshold)) {
             return false;
         }
-        goal.kind = GoalKind::Material;
+        goal.kind = GoalKind::MaterialThreshold;
         goal.materialThreshold = threshold;
         return true;
     }
@@ -1364,7 +1582,8 @@ void printUsage(const char* prog, ostream& out = cerr) {
         << " (default 1..5)\n"
         << "  -t, --tt MB              transposition table size in MB"
         << " (default 8; 0 disables)\n"
-        << "  -g, --goal GOAL          mate or material:K (default mate)\n"
+        << "  -g, --goal GOAL          mate, material, or material:K"
+        << " (default mate)\n"
         << "  -w, --weights NAME       shannon, turing, coxeter, or kaufman"
         << " (default shannon)\n"
         << "  -h, --help               show this help\n"
@@ -1372,7 +1591,7 @@ void printUsage(const char* prog, ostream& out = cerr) {
         << "  build with OPTIONS=-DBOARD_RANKS=N for N in 4..8, default 5\n"
         << "  add -DFORBID_TRIVIAL_4X8_WIN=1 to omit e2f3/g2f3 as 4x8 first moves\n"
         << "  examples: " << prog << " -d 5 -t 8, "
-        << prog << " --depth 1..5 --goal material:300 --weights shannon\n";
+        << prog << " --depth 1..5 --goal material --weights shannon\n";
 }
 
 bool optionNeedsValue(const char* prog, const string& option, int argc,
@@ -1509,15 +1728,27 @@ int main(int argc, char** argv) {
     }
     cout << "\n\n";
 
-    cout << "=== White forced " << goalDescription(currentGoal) << " ===\n";
-    for (int n = options.depths.first; n <= options.depths.last; n++) {
-        whiteCanForceGoalIn(start, n);
-    }
+    if (currentGoal.kind == GoalKind::MaterialValue) {
+        cout << "=== White max material ===\n";
+        for (int n = options.depths.first; n <= options.depths.last; n++) {
+            whiteMaterialValueIn(start, n);
+        }
 
-    cout << "\n=== Black forced " << goalDescription(currentGoal)
-         << " after White's first move ===\n";
-    for (int n = options.depths.first; n <= options.depths.last; n++) {
-        blackCanForceGoalAfterWhiteMove(start, n);
+        cout << "\n=== Black max material after White's first move ===\n";
+        for (int n = options.depths.first; n <= options.depths.last; n++) {
+            blackMaterialValueAfterWhiteMove(start, n);
+        }
+    } else {
+        cout << "=== White forced " << goalDescription(currentGoal) << " ===\n";
+        for (int n = options.depths.first; n <= options.depths.last; n++) {
+            whiteCanForceGoalIn(start, n);
+        }
+
+        cout << "\n=== Black forced " << goalDescription(currentGoal)
+             << " after White's first move ===\n";
+        for (int n = options.depths.first; n <= options.depths.last; n++) {
+            blackCanForceGoalAfterWhiteMove(start, n);
+        }
     }
 
     cout << "\nTT hits=" << tt.hits
