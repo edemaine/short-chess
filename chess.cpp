@@ -798,6 +798,8 @@ void legalSearchMoves(const Position& p, SearchMoveList& out,
     out.sortByScore();
 }
 
+uint64_t ttContextKey = 0;
+
 struct TTEntry {
     uint64_t key = 0;
 #if TT_DOUBLE_HASH
@@ -835,18 +837,28 @@ struct TranspositionTable {
         return table.size() * sizeof(TTEntry);
     }
 
-    uint64_t cacheKey(uint64_t positionKey) const {
-        return positionKey;
+    uint64_t cacheKey(const Position& p) const {
+        return p.key ^ ttContextKey;
     }
+
+#if TT_DOUBLE_HASH
+    uint64_t cacheKey2(const Position& p) const {
+        return p.key2 ^ (ttContextKey << 1) ^ (ttContextKey >> 63);
+    }
+#endif
 
     bool lookup(const Position& p, int moves, bool& result) {
         if (!enabled()) return false;
 
-        const TTEntry& e = table[cacheKey(p.key) % table.size()];
-        if (e.result != 0 &&
-            e.key == p.key &&
+        uint64_t key = cacheKey(p);
 #if TT_DOUBLE_HASH
-            e.key2 == p.key2 &&
+        uint64_t key2 = cacheKey2(p);
+#endif
+        const TTEntry& e = table[key % table.size()];
+        if (e.result != 0 &&
+            e.key == key &&
+#if TT_DOUBLE_HASH
+            e.key2 == key2 &&
 #endif
             ((e.result == 2 && e.moves <= moves) ||
              (e.result == 1 && e.moves >= moves))) {
@@ -861,11 +873,15 @@ struct TranspositionTable {
     void store(const Position& p, int moves, bool result) {
         if (!enabled()) return;
 
-        TTEntry& e = table[cacheKey(p.key) % table.size()];
-        if (e.result != 0 &&
-            e.key == p.key &&
+        uint64_t key = cacheKey(p);
 #if TT_DOUBLE_HASH
-            e.key2 == p.key2 &&
+        uint64_t key2 = cacheKey2(p);
+#endif
+        TTEntry& e = table[key % table.size()];
+        if (e.result != 0 &&
+            e.key == key &&
+#if TT_DOUBLE_HASH
+            e.key2 == key2 &&
 #endif
             e.moves != moves &&
             ((e.result == 2 && e.moves <= moves && result) ||
@@ -873,18 +889,18 @@ struct TranspositionTable {
             return;
         }
         if (e.result != 0 &&
-            (e.key != p.key ||
+            (e.key != key ||
 #if TT_DOUBLE_HASH
-             e.key2 != p.key2 ||
+             e.key2 != key2 ||
 #endif
              e.moves != moves) &&
             e.moves > moves) {
             return;
         }
 
-        e.key = p.key;
+        e.key = key;
 #if TT_DOUBLE_HASH
-        e.key2 = p.key2;
+        e.key2 = key2;
 #endif
         e.moves = uint8_t(moves);
         e.result = result ? 2 : 1;
@@ -910,6 +926,17 @@ struct SearchGoal {
 };
 
 SearchGoal currentGoal;
+Color currentAttacker = WHITE;
+
+void setCurrentAttacker(Color attacker) {
+    currentAttacker = attacker;
+    if (currentGoal.kind == GoalKind::Material) {
+        ttContextKey = attacker == WHITE ? 0x5f7c2e8d9a4316b0ULL
+                                         : 0xb8d13a64c2f09e57ULL;
+    } else {
+        ttContextKey = 0;
+    }
+}
 
 int materialBalance(const Position& p, Color side) {
     int balance = 0;
@@ -955,13 +982,18 @@ string moveName(const Move& m) {
     return s;
 }
 
-// Side-to-move can force a goal within this many own moves.
-// Example: moves=3 means move, reply, move, reply, move reaches the goal.
+// Side-to-move can force the current goal within this many own moves.
+// For mate, success can occur as soon as a checking move leaves no replies.
+// For material, all reply branches are searched to the horizon, where the
+// material balance is tested for currentAttacker.
 bool forceGoalInMoves(const Position& p, int moves, long long& nodes) {
     nodes++;
 
     // p.side is the side trying to force the goal at this node.
-    if (moves <= 0) return false;
+    if (moves <= 0) {
+        return currentGoal.kind == GoalKind::Material &&
+               materialGoalReached(p, currentAttacker);
+    }
 
     bool cached = false;
     if (tt.lookup(p, moves, cached)) {
@@ -977,13 +1009,6 @@ bool forceGoalInMoves(const Position& p, int moves, long long& nodes) {
 
     for (int i = 0; i < myMoves.n; i++) {
         const Position& q = myMoves.position(myMoves.order[i]);
-        Color attacker = other(q.side);
-
-        if (currentGoal.kind == GoalKind::Material &&
-            materialGoalReached(q, attacker)) {
-            tt.store(p, moves, true);
-            return true;
-        }
 
         SearchMoveList replies;
         legalSearchMoves(q, replies, false);
@@ -1026,7 +1051,10 @@ bool forceGoalInMoves(const Position& p, int moves, long long& nodes) {
 bool forceGoalInMovesRoot(const Position& p, int moves, long long& nodes) {
     nodes++;
 
-    if (moves <= 0) return false;
+    if (moves <= 0) {
+        return currentGoal.kind == GoalKind::Material &&
+               materialGoalReached(p, currentAttacker);
+    }
 
     SearchMoveList myMoves;
     forbidTrivial4x8WinForNextMoveGen = true;
@@ -1037,12 +1065,6 @@ bool forceGoalInMovesRoot(const Position& p, int moves, long long& nodes) {
 
     for (int i = 0; i < myMoves.n; i++) {
         const Position& q = myMoves.position(myMoves.order[i]);
-        Color attacker = other(q.side);
-
-        if (currentGoal.kind == GoalKind::Material &&
-            materialGoalReached(q, attacker)) {
-            return true;
-        }
 
         SearchMoveList replies;
         legalSearchMoves(q, replies, false);
@@ -1151,6 +1173,7 @@ bool whiteCanForceGoalIn(const Position& start, int n) {
     Position p = start;
     p.side = WHITE;
     computeKeys(p);
+    setCurrentAttacker(WHITE);
 
     long long nodes = 0;
     bool ans = forceGoalInMovesRoot(p, n, nodes);
@@ -1189,6 +1212,7 @@ bool blackCanForceGoalAfterWhiteMove(const Position& start, int n) {
 
     for (const Move& wm : whiteFirstMoves) {
         Position afterWhite = makeMove(p, wm);
+        setCurrentAttacker(BLACK);
 
         long long nodes = 0;
         bool blackForces = forceGoalInMoves(afterWhite, n, nodes);

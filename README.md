@@ -7,10 +7,12 @@ On a 4×8 board, this means every square is occupied by a piece.
 On a 5×8 board, this leaves one empty rank between the pawn rows.
 This chess variant was introduced by Joseph Palin as a way to approach 8×8 chess.
 
-The program answers two questions for a number *n*:
+The program answers the following questions for a number *n*:
 
 - Can White, moving first, force checkmate in *n* White moves?
 - After any White first move, can Black force checkmate in *n* Black moves?
+- Instead of checkmate (which requires reaching the game's end), what if
+  the goal is just to reach a specified material advantage after *n* moves?
 
 The rules implemented are normal movement, check/checkmate, promotion, initial
 two-square pawn moves, and en passant. Castling and draw rules are intentionally
@@ -82,11 +84,10 @@ So far, this exhaustive search has confirmed that 5×8 chess has no winning
 strategy for White or Black up to mate-in-11
 (11 White moves and 10 or 11 Black moves, for a total of 20 or 21 plies).
 
-## Build and Run
+## Building
 
 ```sh
 make
-./chess [options]
 ```
 
 The number of ranks is a compile-time option from 4 through 8:
@@ -116,6 +117,12 @@ The one-key variant is less safe because a rare hash collision could confuse
 two different positions, but it fits more transposition-table entries in the
 same memory budget.
 
+## Usage
+
+```sh
+./chess [options]
+```
+
 Examples:
 
 ```sh
@@ -136,10 +143,11 @@ Options:
 ```
 
 The `mate` goal is the original search objective. The `material:K` goal asks
-whether the side to move can force a material advantage of at least `K` after
-one of its own moves, no matter how the opponent replied earlier in the line.
-`K` is measured in the selected centipawn weight scale, so under the default
-Shannon weights `material:300` means a three-pawn advantage or equivalent.
+whether the side to move can force a material advantage of at least `K` at the
+search horizon, no matter how the opponent replies. Checkmate still satisfies
+the goal early. `K` is measured in the selected centipawn weight scale, so under
+the default Shannon weights `material:300` means a three-pawn advantage or
+equivalent.
 
 The material weights are from the
 [Chessprogramming wiki point-value table](https://www.chessprogramming.org/Point_Value).
