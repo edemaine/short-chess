@@ -169,6 +169,9 @@ pawn, knight, bishop, rook, and queen. The other built-in sets are `turing`
 
 - Move ordering prioritizes checking moves, promotions, and high-value captures
   so failed branches are usually refuted earlier.
+- The exact `material` goal uses alpha-beta pruning, so material values can cut
+  off once the attacker already has a better line or the defender already has a
+  refuting reply.
 - A fixed-size transposition table caches exact search results for
   `(position, remaining moves)`. It uses
   [Zobrist hashing](https://en.wikipedia.org/wiki/Zobrist_hashing) and a

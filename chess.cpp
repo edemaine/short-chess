@@ -1158,7 +1158,8 @@ bool forceGoalInMovesRoot(const Position& p, int moves, long long& nodes) {
 #define forceGoalInMovesRoot forceGoalInMoves
 #endif
 
-int materialValueInMoves(const Position& p, int moves, long long& nodes) {
+int materialValueInMoves(const Position& p, int moves, int alpha, int beta,
+                         long long& nodes) {
     nodes++;
 
     if (moves <= 0) return materialBalance(p, currentAttacker);
@@ -1179,6 +1180,7 @@ int materialValueInMoves(const Position& p, int moves, long long& nodes) {
     }
 
     int best = -MATERIAL_INF;
+    bool exact = true;
     for (int i = 0; i < myMoves.n; i++) {
         const Position& q = myMoves.position(myMoves.order[i]);
 
@@ -1195,22 +1197,31 @@ int materialValueInMoves(const Position& p, int moves, long long& nodes) {
                 const Position& afterReply =
                     replies.position(replies.order[j]);
                 int value = materialValueInMoves(afterReply, moves - 1,
+                                                 alpha, moveValue,
                                                  nodes);
                 moveValue = min(moveValue, value);
-                if (moveValue == -MATERIAL_INF) break;
+                if (moveValue <= alpha) {
+                    exact = false;
+                    break;
+                }
             }
         }
 
         best = max(best, moveValue);
-        if (best == MATERIAL_INF) break;
+        alpha = max(alpha, best);
+        if (alpha >= beta) {
+            exact = false;
+            break;
+        }
     }
 
-    tt.storeValue(p, moves, best);
+    if (exact) tt.storeValue(p, moves, best);
     return best;
 }
 
 #if FORBID_TRIVIAL_4X8_WIN
-int materialValueInMovesRoot(const Position& p, int moves, long long& nodes) {
+int materialValueInMovesRoot(const Position& p, int moves, int alpha, int beta,
+                             long long& nodes) {
     nodes++;
 
     if (moves <= 0) return materialBalance(p, currentAttacker);
@@ -1243,14 +1254,16 @@ int materialValueInMovesRoot(const Position& p, int moves, long long& nodes) {
                 const Position& afterReply =
                     replies.position(replies.order[j]);
                 int value = materialValueInMoves(afterReply, moves - 1,
+                                                 alpha, moveValue,
                                                  nodes);
                 moveValue = min(moveValue, value);
-                if (moveValue == -MATERIAL_INF) break;
+                if (moveValue <= alpha) break;
             }
         }
 
         best = max(best, moveValue);
-        if (best == MATERIAL_INF) break;
+        alpha = max(alpha, best);
+        if (alpha >= beta) break;
     }
 
     return best;
@@ -1367,7 +1380,8 @@ int whiteMaterialValueIn(const Position& start, int n) {
     setCurrentAttacker(WHITE);
 
     long long nodes = 0;
-    int value = materialValueInMovesRoot(p, n, nodes);
+    int value = materialValueInMovesRoot(p, n, -MATERIAL_INF, MATERIAL_INF,
+                                         nodes);
 
     cout << "White max material in " << n << ": "
          << materialValueDescription(value)
@@ -1436,7 +1450,8 @@ int blackMaterialValueAfterWhiteMove(const Position& start, int n) {
         setCurrentAttacker(BLACK);
 
         long long nodes = 0;
-        int value = materialValueInMoves(afterWhite, n, nodes);
+        int value = materialValueInMoves(afterWhite, n, -MATERIAL_INF,
+                                         MATERIAL_INF, nodes);
         overall = min(overall, value);
 
         cout << "1. " << moveName(wm)
