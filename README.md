@@ -86,7 +86,7 @@ strategy for White or Black up to mate-in-11
 
 ```sh
 make
-./chess [depth|first..last] [transposition-table-mb]
+./chess [options]
 ```
 
 The number of ranks is a compile-time option from 4 through 8:
@@ -119,13 +119,35 @@ same memory budget.
 Examples:
 
 ```sh
-./chess 5 8     # search just mate-in-5 with an 8 MB transposition table
-./chess 1..5 8  # search mate-in-1, mate-in-2, ..., mate-in-5
-./chess 6 0     # search just mate-in-6 with the transposition table disabled
+./chess -d 5 -t 8  # search just depth 5 with an 8 MB transposition table
+./chess --depth 1..5 --tt 8  # search depths 1, 2, 3, 4, and 5
+./chess --depth 6 --tt 0  # search depth 6 with the transposition table disabled
+./chess --depth 3 --goal material:300 --weights shannon  # force +3 pawns
 ```
 
-If omitted, the depth range defaults to `1..5` and the transposition table
-defaults to `8` MB.
+Options:
+
+```text
+-d, --depth N|A..B       own-move depth range, within 1..255 (default 1..5)
+-t, --tt MB              transposition table size in MB (default 8; 0 disables)
+-g, --goal GOAL          mate or material:K (default mate)
+-w, --weights NAME       shannon, turing, coxeter, or kaufman (default shannon)
+-h, --help               show usage
+```
+
+The `mate` goal is the original search objective. The `material:K` goal asks
+whether the side to move can force a material advantage of at least `K` after
+one of its own moves, no matter how the opponent replied earlier in the line.
+`K` is measured in the selected centipawn weight scale, so under the default
+Shannon weights `material:300` means a three-pawn advantage or equivalent.
+
+The material weights are from the
+[Chessprogramming wiki point-value table](https://www.chessprogramming.org/Point_Value).
+The default `shannon` set is Claude Shannon's `{100, 300, 300, 500, 900}` for
+pawn, knight, bishop, rook, and queen. The other built-in sets are `turing`
+`{100, 300, 350, 500, 1000}`, `coxeter`
+`{100, 300, 350, 550, 1000}`, and `kaufman`
+`{100, 350, 350, 525, 1000}`.
 
 ## Main Optimizations
 

@@ -101,13 +101,66 @@ bool isEmpty(char p) { return p == '.'; }
 bool isKing(char p) { return p == 'K' || p == 'k'; }
 char lowerPiece(char p) { return isWhite(p) ? char(p - 'A' + 'a') : p; }
 
+struct PieceWeights {
+    string name;
+    int pawn;
+    int knight;
+    int bishop;
+    int rook;
+    int queen;
+};
+
+PieceWeights shannonWeights() {
+    return {"shannon", 100, 300, 300, 500, 900};
+}
+
+PieceWeights turingWeights() {
+    return {"turing", 100, 300, 350, 500, 1000};
+}
+
+PieceWeights coxeterWeights() {
+    return {"coxeter", 100, 300, 350, 550, 1000};
+}
+
+PieceWeights kaufmanWeights() {
+    return {"kaufman", 100, 350, 350, 525, 1000};
+}
+
+PieceWeights currentWeights = shannonWeights();
+
+bool parseWeights(const string& name, PieceWeights& out) {
+    if (name == "shannon") {
+        out = shannonWeights();
+    } else if (name == "turing") {
+        out = turingWeights();
+    } else if (name == "coxeter") {
+        out = coxeterWeights();
+    } else if (name == "kaufman") {
+        out = kaufmanWeights();
+    } else {
+        return false;
+    }
+    return true;
+}
+
+string weightsDescription(const PieceWeights& w) {
+    ostringstream out;
+    out << w.name << " weights: "
+        << "P=" << w.pawn
+        << ", N=" << w.knight
+        << ", B=" << w.bishop
+        << ", R=" << w.rook
+        << ", Q=" << w.queen;
+    return out.str();
+}
+
 int pieceValue(char p) {
     switch (lowerPiece(p)) {
-        case 'q': return 900;
-        case 'r': return 500;
-        case 'b': return 325;
-        case 'n': return 300;
-        case 'p': return 100;
+        case 'q': return currentWeights.queen;
+        case 'r': return currentWeights.rook;
+        case 'b': return currentWeights.bishop;
+        case 'n': return currentWeights.knight;
+        case 'p': return currentWeights.pawn;
         default: return 0;
     }
 }
@@ -660,7 +713,8 @@ char capturedPiece(const Position& p, const Move& m) {
     return '.';
 }
 
-int moveScore(const Position& p, const Move& m, const Position& q, bool forcingMove) {
+int moveScore(const Position& p, const Move& m, const Position& q,
+              bool forcingMove) {
     char pc = p.b[m.from];
     char piece = lowerPiece(pc);
     int score = 0;
@@ -727,7 +781,8 @@ struct SearchMoveList {
     }
 };
 
-void legalSearchMoves(const Position& p, SearchMoveList& out, bool forcingMove) {
+void legalSearchMoves(const Position& p, SearchMoveList& out,
+                      bool forcingMove) {
     MoveList pseudo;
 
     out.clear();
@@ -847,6 +902,43 @@ bool isCheckmate(const Position& p) {
     return moves.empty();
 }
 
+enum class GoalKind { Mate, Material };
+
+struct SearchGoal {
+    GoalKind kind = GoalKind::Mate;
+    int materialThreshold = 0;
+};
+
+SearchGoal currentGoal;
+
+int materialBalance(const Position& p, Color side) {
+    int balance = 0;
+
+    for (char pc : p.b) {
+        if (isEmpty(pc)) continue;
+        int value = pieceValue(pc);
+        if (sameColor(pc, side)) {
+            balance += value;
+        } else {
+            balance -= value;
+        }
+    }
+
+    return balance;
+}
+
+string goalDescription(const SearchGoal& goal) {
+    if (goal.kind == GoalKind::Mate) return "mate";
+
+    ostringstream out;
+    out << "material >= " << goal.materialThreshold;
+    return out.str();
+}
+
+bool materialGoalReached(const Position& p, Color attacker) {
+    return materialBalance(p, attacker) >= currentGoal.materialThreshold;
+}
+
 // Convert a board index to algebraic square notation such as "e4".
 string sqName(int s) {
     string out;
@@ -863,12 +955,12 @@ string moveName(const Move& m) {
     return s;
 }
 
-// Side-to-move can force mate within this many own moves.
-// Example: moves=3 means move, reply, move, reply, move mate.
-bool forceMateInMoves(const Position& p, int moves, long long& nodes) {
+// Side-to-move can force a goal within this many own moves.
+// Example: moves=3 means move, reply, move, reply, move reaches the goal.
+bool forceGoalInMoves(const Position& p, int moves, long long& nodes) {
     nodes++;
 
-    // p.side is the side trying to force mate at this node.
+    // p.side is the side trying to force the goal at this node.
     if (moves <= 0) return false;
 
     bool cached = false;
@@ -885,6 +977,13 @@ bool forceMateInMoves(const Position& p, int moves, long long& nodes) {
 
     for (int i = 0; i < myMoves.n; i++) {
         const Position& q = myMoves.position(myMoves.order[i]);
+        Color attacker = other(q.side);
+
+        if (currentGoal.kind == GoalKind::Material &&
+            materialGoalReached(q, attacker)) {
+            tt.store(p, moves, true);
+            return true;
+        }
 
         SearchMoveList replies;
         legalSearchMoves(q, replies, false);
@@ -903,7 +1002,7 @@ bool forceMateInMoves(const Position& p, int moves, long long& nodes) {
         for (int j = 0; j < replies.n; j++) {
             const Position& afterReply = replies.position(replies.order[j]);
 
-            if (!forceMateInMoves(afterReply, moves - 1, nodes)) {
+            if (!forceGoalInMoves(afterReply, moves - 1, nodes)) {
                 worksAgainstEveryReply = false;
                 break;
             }
@@ -922,9 +1021,9 @@ bool forceMateInMoves(const Position& p, int moves, long long& nodes) {
 #if FORBID_TRIVIAL_4X8_WIN
 // Special top-level search entry point. When the trivial 4x8 filter is enabled,
 // only this root ply omits the two immediate winning moves; recursive calls use
-// forceMateInMoves() so the normal position cache and legal move set still
+// forceGoalInMoves() so the normal position cache and legal move set still
 // apply everywhere below the root.
-bool forceMateInMovesRoot(const Position& p, int moves, long long& nodes) {
+bool forceGoalInMovesRoot(const Position& p, int moves, long long& nodes) {
     nodes++;
 
     if (moves <= 0) return false;
@@ -938,6 +1037,12 @@ bool forceMateInMovesRoot(const Position& p, int moves, long long& nodes) {
 
     for (int i = 0; i < myMoves.n; i++) {
         const Position& q = myMoves.position(myMoves.order[i]);
+        Color attacker = other(q.side);
+
+        if (currentGoal.kind == GoalKind::Material &&
+            materialGoalReached(q, attacker)) {
+            return true;
+        }
 
         SearchMoveList replies;
         legalSearchMoves(q, replies, false);
@@ -952,7 +1057,7 @@ bool forceMateInMovesRoot(const Position& p, int moves, long long& nodes) {
         for (int j = 0; j < replies.n; j++) {
             const Position& afterReply = replies.position(replies.order[j]);
 
-            if (!forceMateInMoves(afterReply, moves - 1, nodes)) {
+            if (!forceGoalInMoves(afterReply, moves - 1, nodes)) {
                 worksAgainstEveryReply = false;
                 break;
             }
@@ -964,7 +1069,7 @@ bool forceMateInMovesRoot(const Position& p, int moves, long long& nodes) {
     return false;
 }
 #else
-#define forceMateInMovesRoot forceMateInMoves
+#define forceGoalInMovesRoot forceGoalInMoves
 #endif
 
 void printIndent(int n) {
@@ -987,7 +1092,7 @@ bool moveForcesMate(const Position& p, const Move& m, int moves) {
     for (const Move& reply : replies) {
         Position afterReply = makeMove(q, reply);
         long long nodes = 0;
-        if (!forceMateInMoves(afterReply, moves - 1, nodes)) {
+        if (!forceGoalInMoves(afterReply, moves - 1, nodes)) {
             return false;
         }
     }
@@ -1040,20 +1145,21 @@ int printMateStrategy(const Position& p, int moves, int moveNumber, int indent,
     return strategies;
 }
 
-// Print whether White can force mate from the initial position in n White moves.
-bool whiteCanForceMateIn(const Position& start, int n) {
+// Print whether White can force the configured goal from the initial position
+// in n White moves.
+bool whiteCanForceGoalIn(const Position& start, int n) {
     Position p = start;
     p.side = WHITE;
     computeKeys(p);
 
     long long nodes = 0;
-    bool ans = forceMateInMovesRoot(p, n, nodes);
+    bool ans = forceGoalInMovesRoot(p, n, nodes);
 
-    cout << "White mate in " << n << ": "
+    cout << "White " << goalDescription(currentGoal) << " in " << n << ": "
          << (ans ? "YES" : "no")
          << ", nodes=" << nodes << "\n";
 
-    if (ans && n <= 3) {
+    if (currentGoal.kind == GoalKind::Mate && ans && n <= 3) {
         cout << "\nWhite mate-in-" << n << " strategy:\n";
         int strategies = printMateStrategy(p, n, 1, 0, true);
         if (strategies == 0) {
@@ -1067,9 +1173,9 @@ bool whiteCanForceMateIn(const Position& start, int n) {
 }
 
 // This answers:
-// After White's first move, can Black force mate in n Black moves
+// After White's first move, can Black force the configured goal in n Black moves
 // no matter which first move White chooses?
-bool blackCanForceMateAfterWhiteMove(const Position& start, int n) {
+bool blackCanForceGoalAfterWhiteMove(const Position& start, int n) {
     Position p = start;
     p.side = WHITE;
     computeKeys(p);
@@ -1078,17 +1184,21 @@ bool blackCanForceMateAfterWhiteMove(const Position& start, int n) {
 
     bool blackForcesAfterAllWhiteMoves = true;
 
-    cout << "\nTesting Black mate in " << n
+    cout << "\nTesting Black " << goalDescription(currentGoal) << " in " << n
          << " after White's first move:\n";
 
     for (const Move& wm : whiteFirstMoves) {
         Position afterWhite = makeMove(p, wm);
 
         long long nodes = 0;
-        bool blackForces = forceMateInMoves(afterWhite, n, nodes);
+        bool blackForces = forceGoalInMoves(afterWhite, n, nodes);
 
         cout << "1. " << moveName(wm)
-             << " : " << (blackForces ? "Black mates" : "White escapes")
+             << " : "
+             << (blackForces
+                 ? (currentGoal.kind == GoalKind::Mate ? "Black mates"
+                                                       : "Black reaches goal")
+                 : "White escapes")
              << ", nodes=" << nodes << "\n";
 
         if (!blackForces) {
@@ -1097,7 +1207,7 @@ bool blackCanForceMateAfterWhiteMove(const Position& start, int n) {
         }
     }
 
-    cout << "Overall Black mate in " << n << ": "
+    cout << "Overall Black " << goalDescription(currentGoal) << " in " << n << ": "
          << (blackForcesAfterAllWhiteMoves ? "YES" : "no")
          << "\n";
 
@@ -1167,44 +1277,200 @@ bool parseDepthRange(const string& spec, DepthRange& range) {
     return true;
 }
 
-void printUsage(const char* prog) {
-    cerr << "usage: " << prog << " [depth|first..last] [transposition-table-mb]\n"
-         << "  depth range must be within 1..255\n"
-         << "  build with OPTIONS=-DBOARD_RANKS=N for N in 4..8, default 5\n"
-         << "  add -DFORBID_TRIVIAL_4X8_WIN=1 to omit e2f3/g2f3 as 4x8 first moves\n"
-         << "  examples: " << prog << " 5, " << prog << " 1..5 8\n";
+bool parseNonNegativeInt(const string& s, int& out) {
+    if (s.empty()) return false;
+
+    int value = 0;
+    for (char ch : s) {
+        if (!isdigit(static_cast<unsigned char>(ch))) return false;
+        int digit = ch - '0';
+        if (value > (numeric_limits<int>::max() - digit) / 10) return false;
+        value = value * 10 + digit;
+    }
+
+    out = value;
+    return true;
 }
 
-// Run the mate search for one depth or an inclusive range of depths.
-// argv[2] optionally sets the transposition table size in MB, defaulting to 8.
-int main(int argc, char** argv) {
-    if (argc > 3) {
-        printUsage(argv[0]);
-        return 1;
+bool parseSize(const string& s, size_t& out) {
+    if (s.empty()) return false;
+
+    size_t value = 0;
+    for (char ch : s) {
+        if (!isdigit(static_cast<unsigned char>(ch))) return false;
+        size_t digit = static_cast<size_t>(ch - '0');
+        if (value > (numeric_limits<size_t>::max() - digit) / 10) {
+            return false;
+        }
+        value = value * 10 + digit;
     }
 
+    out = value;
+    return true;
+}
+
+bool parseGoal(const string& spec, SearchGoal& goal) {
+    if (spec == "mate") {
+        goal = {};
+        return true;
+    }
+
+    const string prefix = "material:";
+    if (spec.rfind(prefix, 0) == 0) {
+        int threshold = 0;
+        if (!parseNonNegativeInt(spec.substr(prefix.size()), threshold)) {
+            return false;
+        }
+        goal.kind = GoalKind::Material;
+        goal.materialThreshold = threshold;
+        return true;
+    }
+
+    return false;
+}
+
+struct ProgramOptions {
     DepthRange depths;
-    if (argc >= 2) {
-        if (!parseDepthRange(argv[1], depths)) {
-            cerr << "error: invalid depth range '" << argv[1] << "'\n";
+    size_t tt = 8;
+};
+
+void printUsage(const char* prog, ostream& out = cerr) {
+    out << "usage: " << prog << " [options]\n"
+        << "  -d, --depth N|A..B       own-move depth range, within 1..255"
+        << " (default 1..5)\n"
+        << "  -t, --tt MB              transposition table size in MB"
+        << " (default 8; 0 disables)\n"
+        << "  -g, --goal GOAL          mate or material:K (default mate)\n"
+        << "  -w, --weights NAME       shannon, turing, coxeter, or kaufman"
+        << " (default shannon)\n"
+        << "  -h, --help               show this help\n"
+        << "  material K is measured in the selected centipawn weight scale\n"
+        << "  build with OPTIONS=-DBOARD_RANKS=N for N in 4..8, default 5\n"
+        << "  add -DFORBID_TRIVIAL_4X8_WIN=1 to omit e2f3/g2f3 as 4x8 first moves\n"
+        << "  examples: " << prog << " -d 5 -t 8, "
+        << prog << " --depth 1..5 --goal material:300 --weights shannon\n";
+}
+
+bool optionNeedsValue(const char* prog, const string& option, int argc,
+                      char** argv, int& i, string& value) {
+    if (i + 1 >= argc) {
+        cerr << "error: missing value for " << option << "\n";
+        printUsage(prog);
+        return false;
+    }
+
+    value = argv[++i];
+    return true;
+}
+
+bool parseOptions(int argc, char** argv, ProgramOptions& options,
+                  bool& helpRequested) {
+    helpRequested = false;
+
+    for (int i = 1; i < argc; i++) {
+        string arg = argv[i];
+        string value;
+
+        if (arg == "-h" || arg == "--help") {
+            helpRequested = true;
+            return true;
+        } else if (arg == "-d" || arg == "--depth") {
+            if (!optionNeedsValue(argv[0], arg, argc, argv, i, value)) {
+                return false;
+            }
+            if (!parseDepthRange(value, options.depths)) {
+                cerr << "error: invalid depth range '" << value << "'\n";
+                printUsage(argv[0]);
+                return false;
+            }
+        } else if (arg.rfind("--depth=", 0) == 0) {
+            value = arg.substr(8);
+            if (!parseDepthRange(value, options.depths)) {
+                cerr << "error: invalid depth range '" << value << "'\n";
+                printUsage(argv[0]);
+                return false;
+            }
+        } else if (arg == "-t" || arg == "--tt") {
+            if (!optionNeedsValue(argv[0], arg, argc, argv, i, value)) {
+                return false;
+            }
+            if (!parseSize(value, options.tt)) {
+                cerr << "error: invalid transposition table size '" << value
+                     << "'\n";
+                printUsage(argv[0]);
+                return false;
+            }
+        } else if (arg.rfind("--tt=", 0) == 0) {
+            value = arg.substr(5);
+            if (!parseSize(value, options.tt)) {
+                cerr << "error: invalid transposition table size '" << value
+                     << "'\n";
+                printUsage(argv[0]);
+                return false;
+            }
+        } else if (arg == "-g" || arg == "--goal") {
+            if (!optionNeedsValue(argv[0], arg, argc, argv, i, value)) {
+                return false;
+            }
+            if (!parseGoal(value, currentGoal)) {
+                cerr << "error: invalid goal '" << value << "'\n";
+                printUsage(argv[0]);
+                return false;
+            }
+        } else if (arg.rfind("--goal=", 0) == 0) {
+            value = arg.substr(7);
+            if (!parseGoal(value, currentGoal)) {
+                cerr << "error: invalid goal '" << value << "'\n";
+                printUsage(argv[0]);
+                return false;
+            }
+        } else if (arg == "-w" || arg == "--weights") {
+            if (!optionNeedsValue(argv[0], arg, argc, argv, i, value)) {
+                return false;
+            }
+            if (!parseWeights(value, currentWeights)) {
+                cerr << "error: invalid weights '" << value << "'\n";
+                printUsage(argv[0]);
+                return false;
+            }
+        } else if (arg.rfind("--weights=", 0) == 0) {
+            value = arg.substr(10);
+            if (!parseWeights(value, currentWeights)) {
+                cerr << "error: invalid weights '" << value << "'\n";
+                printUsage(argv[0]);
+                return false;
+            }
+        } else {
+            cerr << "error: unexpected positional argument or option '" << arg
+                 << "'\n";
             printUsage(argv[0]);
-            return 1;
+            return false;
         }
     }
-    if (depths.last > 255) {
-        cerr << "error: depth must be <= 255\n";
+
+    return true;
+}
+
+// Run the configured goal search for one depth or an inclusive range of depths.
+int main(int argc, char** argv) {
+    ProgramOptions options;
+    bool helpRequested = false;
+    if (!parseOptions(argc, argv, options, helpRequested)) {
         return 1;
     }
 
-    size_t ttMB = 8;
-    if (argc >= 3) {
-        ttMB = strtoull(argv[2], nullptr, 10);
+    if (helpRequested) {
+        printUsage(argv[0], cout);
+        return 0;
     }
 
     Position start = initialPosition();
 
     printBoard(start);
-    tt.resizeMB(ttMB);
+    tt.resizeMB(options.tt);
+
+    cout << "\nGoal: " << goalDescription(currentGoal)
+         << "\nWeights: " << weightsDescription(currentWeights) << "\n";
 
     cout << fixed << setprecision(2)
          << "\nTransposition table: "
@@ -1219,14 +1485,15 @@ int main(int argc, char** argv) {
     }
     cout << "\n\n";
 
-    cout << "=== White forced mates ===\n";
-    for (int n = depths.first; n <= depths.last; n++) {
-        whiteCanForceMateIn(start, n);
+    cout << "=== White forced " << goalDescription(currentGoal) << " ===\n";
+    for (int n = options.depths.first; n <= options.depths.last; n++) {
+        whiteCanForceGoalIn(start, n);
     }
 
-    cout << "\n=== Black forced mates after White's first move ===\n";
-    for (int n = depths.first; n <= depths.last; n++) {
-        blackCanForceMateAfterWhiteMove(start, n);
+    cout << "\n=== Black forced " << goalDescription(currentGoal)
+         << " after White's first move ===\n";
+    for (int n = options.depths.first; n <= options.depths.last; n++) {
+        blackCanForceGoalAfterWhiteMove(start, n);
     }
 
     cout << "\nTT hits=" << tt.hits
