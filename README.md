@@ -84,6 +84,27 @@ So far, this exhaustive search has confirmed that 5×8 chess has no winning
 strategy for White or Black up to mate-in-11
 (11 White moves and 10 or 11 Black moves, for a total of 20 or 21 plies).
 
+For the `material` goal with Shannon weights, the maximum guaranteed material
+advantage found so far is sadly negative:
+
+| Depth | White max material | White nodes | Black max material | Black nodes |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | -100 | 35 | 0 | 365 |
+| 2 | -100 | 615 | -100 | 5,842 |
+| 3 | -100 | 9,595 | -100 | 84,856 |
+| 4 | -100 | 140,284 | -100 | 1,240,789 |
+| 5 | -100 | 1,987,188 | -100 | 18,118,312 |
+| 6 | -100 | 28,216,851 | -100 | 283,801,145 |
+| 7 | -100 | 415,374,409 | -100 | 3,667,098,906 |
+| 8 | -100 | 6,112,363,361 | -200 | 52,266,189,839 |
+| 9 | -100 | 85,775,957,801 | — | — |
+
+Depth counts the number of moves by the side trying to force the material
+guarantee (about half the number of plies).
+Nodes count recursive search positions visited while proving the guarantee.
+For Black, nodes are totaled over the searches after each legal White first
+move.
+
 ## Building
 
 ```sh
