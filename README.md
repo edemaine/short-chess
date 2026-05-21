@@ -81,8 +81,10 @@ The 5×8 starting board is:
 ![5x8 starting board](figures/5x8-start.svg)
 
 So far, this exhaustive search has confirmed that 5×8 chess has no winning
-strategy for White or Black up to mate-in-11
-(11 White moves and 10 or 11 Black moves, for a total of 20 or 21 plies).
+strategy for White up to mate-in-12
+(12 White moves and 11 Black replies, for a total of 23 plies),
+and no winning strategy for Black up to mate-in-11
+(11 White moves and 11 Black replies, for a total of 22 plies).
 
 For the `material` goal with Shannon weights, the maximum guaranteed material
 advantage found so far is sadly negative:
